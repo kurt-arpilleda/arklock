@@ -6,31 +6,55 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat.startActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 
 @Composable
 fun CheckRequiredPermissions() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     var showPermissionDialog by remember { mutableStateOf(false) }
     var displayOverAppsEnabled by remember { mutableStateOf(false) }
     var usageAccessEnabled by remember { mutableStateOf(false) }
 
-    // Check permissions when composable is launched or recomposed
-    LaunchedEffect(Unit) {
+    // Function to check all permissions
+    fun checkPermissions() {
         displayOverAppsEnabled = canDisplayOverOtherApps(context)
         usageAccessEnabled = hasUsageAccessPermission(context)
         showPermissionDialog = !displayOverAppsEnabled || !usageAccessEnabled
+    }
+
+    // Check permissions when composable is launched
+    LaunchedEffect(Unit) {
+        checkPermissions()
+    }
+
+    // Check permissions when app resumes (user returns from settings)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                checkPermissions()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     if (showPermissionDialog) {
@@ -39,13 +63,18 @@ fun CheckRequiredPermissions() {
             usageAccessEnabled = usageAccessEnabled,
             onDisplayOverAppsClick = {
                 openDisplayOverOtherAppsSettings(context)
-                showPermissionDialog = false
+                // No need to manually handle return - we'll detect it via lifecycle
             },
             onUsageAccessClick = {
                 openUsageAccessSettings(context)
-                showPermissionDialog = false
+                // No need to manually handle return - we'll detect it via lifecycle
             },
-            onDismiss = { showPermissionDialog = false }
+            onDismiss = {
+                // Only allow dismiss if both permissions are granted
+                if (displayOverAppsEnabled && usageAccessEnabled) {
+                    showPermissionDialog = false
+                }
+            }
         )
     }
 }
@@ -60,7 +89,10 @@ fun PermissionDialog(
 ) {
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
+        properties = DialogProperties(
+            dismissOnBackPress = displayOverAppsEnabled && usageAccessEnabled,
+            dismissOnClickOutside = displayOverAppsEnabled && usageAccessEnabled
+        )
     ) {
         Card(
             modifier = Modifier
@@ -103,8 +135,8 @@ fun PermissionDialog(
                 PermissionItem(
                     title = "Display Over Other Apps",
                     description = "Allows ArkLock to show lock screen over other apps",
-                    enabled = !displayOverAppsEnabled,
-                    onClick = onDisplayOverAppsClick,
+                    isEnabled = displayOverAppsEnabled,
+                    onClick = if (!displayOverAppsEnabled) onDisplayOverAppsClick else null,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
 
@@ -112,19 +144,63 @@ fun PermissionDialog(
                 PermissionItem(
                     title = "Usage Access",
                     description = "Allows ArkLock to detect when other apps are opened",
-                    enabled = !usageAccessEnabled,
-                    onClick = onUsageAccessClick,
+                    isEnabled = usageAccessEnabled,
+                    onClick = if (!usageAccessEnabled) onUsageAccessClick else null,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text(
-                    text = "After enabling permissions, return to ArkLock",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
+                // Show different message based on permission status
+                if (displayOverAppsEnabled && usageAccessEnabled) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "All permissions granted! You can now use ArkLock.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text(
+                            text = "Continue",
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Please enable the required permissions above. The dialog will remain open until all permissions are granted.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
             }
         }
     }
@@ -134,41 +210,67 @@ fun PermissionDialog(
 fun PermissionItem(
     title: String,
     description: String,
-    enabled: Boolean,
-    onClick: () -> Unit,
+    isEnabled: Boolean,
+    onClick: (() -> Unit)?,  // Nullable onClick - will be null when enabled
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(
-            containerColor = if (enabled) MaterialTheme.colorScheme.surfaceVariant
-            else MaterialTheme.colorScheme.surface
+            containerColor = if (isEnabled) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            }
         ),
-        onClick = (if (enabled) onClick else {}) as () -> Unit,
-        enabled = enabled
+        onClick = onClick?.let { it } ?: {}  // Only make clickable if onClick is provided
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            )
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = if (enabled) "Tap to enable" else "Already enabled",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (enabled) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-            )
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (isEnabled) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isEnabled) {
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = if (isEnabled) "✓ Enabled" else "Tap to enable",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isEnabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    fontWeight = if (isEnabled) FontWeight.Bold else FontWeight.Normal
+                )
+            }
+
+            if (isEnabled) {
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = "Enabled",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }

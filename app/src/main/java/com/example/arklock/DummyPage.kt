@@ -26,7 +26,7 @@ fun DummyPage() {
     val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
     val passwordType = sharedPref.getString("password_type", "Unknown") ?: "Unknown"
 
-    // Check for required permissions
+    // Check for required permissions - this will show dialog if needed
     CheckRequiredPermissions()
 
     Column(
@@ -85,7 +85,7 @@ fun DummyPage() {
                 )
 
                 // Divider
-                Divider(
+                HorizontalDivider(
                     modifier = Modifier.fillMaxWidth(0.8f),
                     color = MaterialTheme.colorScheme.outline,
                     thickness = 1.dp
