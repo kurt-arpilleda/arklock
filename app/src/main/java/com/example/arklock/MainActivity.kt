@@ -117,12 +117,21 @@ fun AppNavigation() {
     val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
     val hasPassword = sharedPref.getInt("has_password", 0) == 1
 
-    var currentScreen by remember { mutableStateOf(if (hasPassword) "dashboard" else "password") }
+    var currentScreen by remember { mutableStateOf(
+        if (hasPassword) "passcode_verification" else "password_setup"
+    ) }
 
     when (currentScreen) {
-        "password" -> {
+        "password_setup" -> {
             PasswordScreen(
                 onPasswordSaved = { passwordType ->
+                    currentScreen = "dashboard"
+                }
+            )
+        }
+        "passcode_verification" -> {
+            PasscodeScreen(
+                onPasscodeVerified = {
                     currentScreen = "dashboard"
                 }
             )

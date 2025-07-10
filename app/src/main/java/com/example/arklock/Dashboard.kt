@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,7 +40,8 @@ data class AppInfo(
     val packageName: String,
     val icon: Drawable,
     val iconBitmap: Bitmap?,
-    val isSystemApp: Boolean
+    val isSystemApp: Boolean,
+    var isLocked: Boolean = false
 )
 
 @Composable
@@ -51,10 +54,8 @@ fun DashboardPage() {
     var searchQuery by remember { mutableStateOf("") }
     var showSystemApps by remember { mutableStateOf(false) }
 
-    // Check for required permissions - this will show dialog if needed
     CheckRequiredPermissions()
 
-    // Fetch all installed apps
     LaunchedEffect(Unit) {
         isLoading = true
         appsList = withContext(Dispatchers.IO) {
@@ -216,6 +217,16 @@ fun DashboardPage() {
                         onClick = {
                             // TODO: Handle app selection
                             // For now, this is just a placeholder
+                        },
+                        onLockToggle = { isLocked ->
+                            // Update the app's locked state
+                            appsList = appsList.map {
+                                if (it.packageName == app.packageName) {
+                                    it.copy(isLocked = isLocked)
+                                } else {
+                                    it
+                                }
+                            }
                         }
                     )
                 }
@@ -268,8 +279,11 @@ fun DashboardPage() {
 @Composable
 fun AppItem(
     app: AppInfo,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLockToggle: (Boolean) -> Unit
 ) {
+    var isLocked by remember { mutableStateOf(app.isLocked) }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -354,6 +368,22 @@ fun AppItem(
                     }
                 }
             }
+
+            // Lock Toggle Button
+            IconToggleButton(
+                checked = isLocked,
+                onCheckedChange = {
+                    isLocked = it
+                    onLockToggle(it)
+                },
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    imageVector = if (isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                    contentDescription = if (isLocked) "Locked" else "Unlocked",
+                    tint = if (isLocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
@@ -401,7 +431,8 @@ private fun getAllInstalledApps(context: Context): List<AppInfo> {
                             packageName = packageName,
                             icon = icon,
                             iconBitmap = iconBitmap,
-                            isSystemApp = isSystemApp
+                            isSystemApp = isSystemApp,
+                            isLocked = false // Default to unlocked
                         )
                     )
                 }
@@ -458,7 +489,8 @@ private fun getAppsFromIntent(context: Context, packageManager: PackageManager):
                         packageName = packageName,
                         icon = icon,
                         iconBitmap = iconBitmap,
-                        isSystemApp = isSystemApp
+                        isSystemApp = isSystemApp,
+                        isLocked = false // Default to unlocked
                     )
                 )
             } catch (e: Exception) {
