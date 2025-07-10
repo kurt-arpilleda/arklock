@@ -1,196 +1,473 @@
 package com.example.arklock
 
 import android.content.Context
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.drawable.Drawable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+data class AppInfo(
+    val name: String,
+    val packageName: String,
+    val icon: Drawable,
+    val iconBitmap: Bitmap?,
+    val isSystemApp: Boolean
+)
 
 @Composable
 fun DashboardPage() {
     val context = LocalContext.current
     val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
-    val passwordType = sharedPref.getString("password_type", "Unknown") ?: "Unknown"
+
+    var appsList by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var searchQuery by remember { mutableStateOf("") }
+    var showSystemApps by remember { mutableStateOf(false) }
 
     // Check for required permissions - this will show dialog if needed
     CheckRequiredPermissions()
+
+    // Fetch all installed apps
+    LaunchedEffect(Unit) {
+        isLoading = true
+        appsList = withContext(Dispatchers.IO) {
+            getAllInstalledApps(context)
+        }
+        isLoading = false
+    }
+
+    // Filter apps based on search query and system app preference
+    val filteredApps = remember(appsList, searchQuery, showSystemApps) {
+        appsList.filter { app ->
+            val matchesSearch = app.name.contains(searchQuery, ignoreCase = true) ||
+                    app.packageName.contains(searchQuery, ignoreCase = true)
+            val matchesFilter = if (showSystemApps) true else !app.isSystemApp
+            matchesSearch && matchesFilter
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+            .windowInsetsPadding(WindowInsets.systemBars)
+            .padding(16.dp)
     ) {
-        // Success Card
+        // Header
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .shadow(
-                    elevation = 8.dp,
-                    shape = RoundedCornerShape(20.dp)
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(16.dp)
                 ),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
+                containerColor = MaterialTheme.colorScheme.primaryContainer
             )
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Success Icon
                 Box(
                     modifier = Modifier
-                        .size(80.dp)
+                        .size(48.dp)
                         .background(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            RoundedCornerShape(40.dp)
+                            MaterialTheme.colorScheme.primary,
+                            RoundedCornerShape(12.dp)
                         ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        Icons.Default.CheckCircle,
+                        Icons.Default.Apps,
                         contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                        modifier = Modifier.size(24.dp),
+                        tint = Color.White
                     )
                 }
 
-                // Success Title
-                Text(
-                    text = "Password Saved Successfully!",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center
-                )
+                Spacer(modifier = Modifier.width(16.dp))
 
-                // Divider
-                HorizontalDivider(
-                    modifier = Modifier.fillMaxWidth(0.8f),
-                    color = MaterialTheme.colorScheme.outline,
-                    thickness = 1.dp
-                )
-
-                // Password Type Info
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        if (passwordType == "PIN") Icons.Default.Phone else Icons.Default.Lock,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(24.dp)
+                Column {
+                    Text(
+                        text = "Installed Apps",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
-                    Column {
-                        Text(
-                            text = "Your password type is:",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = passwordType,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Security Message
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Your device is now secured with ArkLock",
-                            fontSize = 14.sp,
-                            textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    Text(
+                        text = "${filteredApps.size} apps available",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // Continue Button (for future navigation)
-        Button(
-            onClick = {
-                // TODO: Navigate to main app features
-                // For now, this is just a placeholder
+        // Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Search apps...") },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
             shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline
             )
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Filter Toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Continue to ArkLock",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White
+                text = "Show system apps",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Switch(
+                checked = showSystemApps,
+                onCheckedChange = { showSystemApps = it },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                )
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Reset Password Option (for testing purposes)
-        TextButton(
-            onClick = {
-                // Clear saved password for testing
-                val editor = sharedPref.edit()
-                editor.clear()
-                editor.apply()
-                // TODO: Navigate back to password setup
+        // Apps List
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(48.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Loading apps...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-        ) {
-            Text(
-                text = "Reset Password (Dev Only)",
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 12.sp
-            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.navigationBars),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 16.dp)
+            ) {
+                items(filteredApps) { app ->
+                    AppItem(
+                        app = app,
+                        onClick = {
+                            // TODO: Handle app selection
+                            // For now, this is just a placeholder
+                        }
+                    )
+                }
+
+                if (filteredApps.isEmpty()) {
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.Default.Apps,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "No apps found",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = "Try adjusting your search or filter settings",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
+}
+
+@Composable
+fun AppItem(
+    app: AppInfo,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 2.dp,
+                shape = RoundedCornerShape(12.dp)
+            ),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // App Icon
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                if (app.iconBitmap != null) {
+                    Image(
+                        bitmap = app.iconBitmap.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    // Fallback icon if bitmap conversion fails
+                    Icon(
+                        Icons.Default.Apps,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // App Info
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = app.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = app.packageName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                // System app indicator
+                if (app.isSystemApp) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = "System",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun getAllInstalledApps(context: Context): List<AppInfo> {
+    val packageManager = context.packageManager
+    val apps = mutableListOf<AppInfo>()
+
+    try {
+        // Try multiple approaches to get all apps
+        val installedApps = try {
+            // First try: Get all applications with QUERY_ALL_PACKAGES permission
+            packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+        } catch (e: Exception) {
+            // Fallback: Get applications through installed packages
+            val packages = packageManager.getInstalledPackages(PackageManager.GET_META_DATA)
+            packages.map { it.applicationInfo }
+        }
+
+        for (appInfo in installedApps) {
+            try {
+                // Skip apps that don't have a launcher activity (unless they're system apps we want to show)
+                val launchIntent = packageManager.getLaunchIntentForPackage(appInfo.packageName)
+                val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+
+                // Include app if it has a launcher intent OR if it's a well-known system app
+                if (launchIntent != null || isSystemApp) {
+                    val appName = packageManager.getApplicationLabel(appInfo).toString()
+                    val packageName = appInfo.packageName
+                    val icon = packageManager.getApplicationIcon(appInfo)
+
+                    // Convert icon to bitmap safely
+                    val iconBitmap = try {
+                        icon.toBitmap(
+                            width = 144, // 48dp * 3 for better quality
+                            height = 144
+                        )
+                    } catch (e: Exception) {
+                        null
+                    }
+
+                    apps.add(
+                        AppInfo(
+                            name = appName,
+                            packageName = packageName,
+                            icon = icon,
+                            iconBitmap = iconBitmap,
+                            isSystemApp = isSystemApp
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                // Skip apps that can't be processed
+                continue
+            }
+        }
+
+        // Also try to get apps from specific categories
+        val additionalApps = getAppsFromIntent(context, packageManager)
+        apps.addAll(additionalApps)
+
+    } catch (e: Exception) {
+        // Handle any errors during app fetching
+        e.printStackTrace()
+    }
+
+    // Remove duplicates and sort apps alphabetically by name
+    return apps.distinctBy { it.packageName }.sortedBy { it.name.lowercase() }
+}
+
+private fun getAppsFromIntent(context: Context, packageManager: PackageManager): List<AppInfo> {
+    val apps = mutableListOf<AppInfo>()
+
+    try {
+        // Get all apps that can be launched (have MAIN/LAUNCHER intent)
+        val intent = Intent(Intent.ACTION_MAIN, null)
+        intent.addCategory(Intent.CATEGORY_LAUNCHER)
+
+        val resolveInfos = packageManager.queryIntentActivities(intent, PackageManager.GET_META_DATA)
+
+        for (resolveInfo in resolveInfos) {
+            try {
+                val appInfo = resolveInfo.activityInfo.applicationInfo
+                val appName = packageManager.getApplicationLabel(appInfo).toString()
+                val packageName = appInfo.packageName
+                val icon = packageManager.getApplicationIcon(appInfo)
+                val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+
+                // Convert icon to bitmap safely
+                val iconBitmap = try {
+                    icon.toBitmap(
+                        width = 144,
+                        height = 144
+                    )
+                } catch (e: Exception) {
+                    null
+                }
+
+                apps.add(
+                    AppInfo(
+                        name = appName,
+                        packageName = packageName,
+                        icon = icon,
+                        iconBitmap = iconBitmap,
+                        isSystemApp = isSystemApp
+                    )
+                )
+            } catch (e: Exception) {
+                continue
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+
+    return apps
 }
