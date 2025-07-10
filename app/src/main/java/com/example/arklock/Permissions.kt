@@ -28,6 +28,7 @@ fun CheckRequiredPermissions() {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var showPermissionDialog by remember { mutableStateOf(false) }
+    var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
     var displayOverAppsEnabled by remember { mutableStateOf(false) }
     var usageAccessEnabled by remember { mutableStateOf(false) }
 
@@ -36,6 +37,11 @@ fun CheckRequiredPermissions() {
         displayOverAppsEnabled = canDisplayOverOtherApps(context)
         usageAccessEnabled = hasUsageAccessPermission(context)
         showPermissionDialog = !displayOverAppsEnabled || !usageAccessEnabled
+
+        // Only check battery optimization if permissions are already granted
+        if (!showPermissionDialog) {
+            showBatteryOptimizationDialog = !isBatteryOptimizationDisabled(context)
+        }
     }
 
     // Check permissions when composable is launched
@@ -63,22 +69,99 @@ fun CheckRequiredPermissions() {
             usageAccessEnabled = usageAccessEnabled,
             onDisplayOverAppsClick = {
                 openDisplayOverOtherAppsSettings(context)
-                // No need to manually handle return - we'll detect it via lifecycle
             },
             onUsageAccessClick = {
                 openUsageAccessSettings(context)
-                // No need to manually handle return - we'll detect it via lifecycle
             },
             onDismiss = {
-                // Only allow dismiss if both permissions are granted
                 if (displayOverAppsEnabled && usageAccessEnabled) {
                     showPermissionDialog = false
+                    // After permissions are granted, check battery optimization
+                    showBatteryOptimizationDialog = !isBatteryOptimizationDisabled(context)
                 }
             }
         )
     }
-}
 
+    if (showBatteryOptimizationDialog) {
+        BatteryOptimizationDialog(
+            onConfigureClick = {
+                openBatteryOptimizationSettings(context)
+            }
+        )
+    }
+}
+@Composable
+fun BatteryOptimizationDialog(
+    onConfigureClick: () -> Unit,
+) {  // Removed onDismiss parameter since we won't allow skipping
+    Dialog(
+        onDismissRequest = {},  // Empty lambda prevents dismissal
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Special Configuration Required",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Text(
+                    text = "In order to prevent the App from being stopped by Android in the background, we need to disable battery optimization.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                Text(
+                    text = "This will allow ArkLock to run reliably in the background and maintain your device's security.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 24.dp)
+                )
+
+                Button(
+                    onClick = onConfigureClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text(
+                        text = "Disable Battery Optimization",
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+        }
+    }
+}
 @Composable
 fun PermissionDialog(
     displayOverAppsEnabled: Boolean,
@@ -274,7 +357,17 @@ fun PermissionItem(
         }
     }
 }
+// Add these new utility functions to Permission.kt
+private fun isBatteryOptimizationDisabled(context: Context): Boolean {
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    return powerManager.isIgnoringBatteryOptimizations(context.packageName)
+}
 
+private fun openBatteryOptimizationSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+    intent.data = Uri.parse("package:${context.packageName}")
+    startActivity(context, intent, null)
+}
 // Utility functions
 private fun canDisplayOverOtherApps(context: Context): Boolean {
     return Settings.canDrawOverlays(context)

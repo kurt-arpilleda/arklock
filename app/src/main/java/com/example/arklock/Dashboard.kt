@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-fun DummyPage() {
+fun DashboardPage() {
     val context = LocalContext.current
     val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
     val passwordType = sharedPref.getString("password_type", "Unknown") ?: "Unknown"
