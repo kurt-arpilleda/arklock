@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">ArkLock</string>
+    <string name="set_passcode">Set Passcode</string>
+    <string name="verify_passcode">Verify Passcode</string>
+    <string name="select_password_type">Select Password Type</string>
+    <string name="pin">6-Digit PIN</string>
+    <string name="pattern">Pattern</string>
+    <string name="create">Create</string>
+    <string name="verify">Verify</string>
+    <string name="password_save_success">Password Saved Successfully!</string>
+    <string name="password_save_message">Your app lock password has been set up successfully.</string>
+</resources>

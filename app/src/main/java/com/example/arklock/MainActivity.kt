@@ -1,0 +1,134 @@
+package com.example.arklock
+
+import android.content.Context
+import android.content.IntentFilter
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.example.arklock.ui.theme.ArkLockTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+
+class MainActivity : ComponentActivity() {
+    private lateinit var appUpdateService: AppUpdateService
+    private lateinit var connectivityReceiver: NetworkUtils.ConnectivityReceiver
+    private var networkCallbackRegistered = false
+    private lateinit var networkCallback: ConnectivityManager.NetworkCallback
+    private val networkState = MutableStateFlow(false)
+    private val coroutineScope = CoroutineScope(Dispatchers.Main)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        RetrofitClient.updateWorkingUrl()
+        appUpdateService = AppUpdateService(this)
+        connectivityReceiver = NetworkUtils.ConnectivityReceiver {
+            checkForUpdates()
+        }
+        val filter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
+        registerReceiver(connectivityReceiver, filter)
+        observeNetworkChanges()
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            ArkLockTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    AppNavigation()
+                }
+            }
+        }
+    }
+
+    private fun checkForUpdates() {
+        coroutineScope.launch {
+            if (NetworkUtils.isNetworkAvailable(this@MainActivity)) {
+                appUpdateService.checkForAppUpdate()
+            }
+        }
+    }
+
+    private fun observeNetworkChanges() {
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        if (!networkCallbackRegistered) {
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    super.onAvailable(network)
+                    networkState.value = true
+                }
+
+                override fun onLost(network: Network) {
+                    super.onLost(network)
+                    networkState.value = false
+                }
+            }
+
+            try {
+                val request = NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build()
+
+                connectivityManager.registerNetworkCallback(request, networkCallback)
+                networkCallbackRegistered = true
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+
+        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        try {
+            if (networkCallbackRegistered) {
+                connectivityManager.unregisterNetworkCallback(networkCallback)
+                networkCallbackRegistered = false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        try {
+            unregisterReceiver(connectivityReceiver)
+        } catch (e: IllegalArgumentException) {
+            e.printStackTrace()
+        }
+    }
+}
+
+@Composable
+fun AppNavigation() {
+    val context = LocalContext.current
+    val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+    val hasPassword = sharedPref.getInt("has_password", 0) == 1
+
+    var currentScreen by remember { mutableStateOf(if (hasPassword) "dummy" else "password") }
+
+    when (currentScreen) {
+        "password" -> {
+            PasswordScreen(
+                onPasswordSaved = { passwordType ->
+                    currentScreen = "dummy"
+                }
+            )
+        }
+        "dummy" -> {
+            DummyPage()
+        }
+    }
+}
