@@ -1,10 +1,12 @@
-// LockActivity.kt
 package com.example.arklock
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
@@ -13,23 +15,44 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 
 class LockActivity : ComponentActivity() {
-    private var packageName: String = ""
+    private lateinit var packageName: String
+    private lateinit var sharedPref: SharedPreferences
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         packageName = intent.getStringExtra("package_name") ?: ""
+        sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+
+        // Prevent screenshots and recent apps
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         setContent {
             LockScreenContent(
                 packageName = packageName,
-                onUnlock = { finishAndRemoveTask() }
+                onUnlock = {
+                    // Mark this app as temporarily unlocked
+                    sharedPref.edit().putBoolean("temp_unlock_$packageName", true).apply()
+                    finishAndRemoveTask()
+
+                    // Launch the original app
+                    try {
+                        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+                        startActivity(launchIntent)
+                    } catch (e: Exception) {
+                        // Fallback to home if app can't be launched
+                        val startMain = Intent(Intent.ACTION_MAIN)
+                        startMain.addCategory(Intent.CATEGORY_HOME)
+                        startMain.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        startActivity(startMain)
+                    }
+                }
             )
         }
     }
 
     override fun onBackPressed() {
         super.onBackPressed()
-        // Prevent going back
+        // Prevent going back - force user to enter correct passcode
         moveToHomeScreen()
     }
 

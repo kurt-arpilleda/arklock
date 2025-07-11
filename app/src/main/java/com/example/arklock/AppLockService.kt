@@ -6,6 +6,7 @@ import android.app.Service
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -20,6 +21,10 @@ class AppLockService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO)
     private var monitoringJob: Job? = null
     private var lastForegroundApp = ""
+    private var isUnlockedTemporarily = false
+    private var tempUnlockedPackage = ""
+    private lateinit var sharedPref: SharedPreferences
+
     private val wakeLock by lazy {
         (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
             newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ArkLock:AppLockWakeLock")
@@ -30,6 +35,7 @@ class AppLockService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
         startForeground()
         startMonitoring()
     }
@@ -93,15 +99,33 @@ class AppLockService : Service() {
     private fun checkAndLockApp(packageName: String) {
         if (packageName.isEmpty() || packageName == this.packageName) return
 
-        val sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+        // Check if this app was recently unlocked
+        if (isUnlockedTemporarily && tempUnlockedPackage == packageName) {
+            return
+        }
+
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
 
         if (lockedApps.contains(packageName)) {
+            // Check if this is a temporary unlock (like when coming back from LockActivity)
+            if (sharedPref.getBoolean("temp_unlock_$packageName", false)) {
+                sharedPref.edit().remove("temp_unlock_$packageName").apply()
+                tempUnlockedPackage = packageName
+                isUnlockedTemporarily = true
+                return
+            }
+
             val intent = Intent(this, LockActivity::class.java).apply {
                 putExtra("package_name", packageName)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }
             startActivity(intent)
+        } else {
+            // Reset temporary unlock if switching to a different app
+            if (tempUnlockedPackage.isNotEmpty() && tempUnlockedPackage != packageName) {
+                isUnlockedTemporarily = false
+                tempUnlockedPackage = ""
+            }
         }
     }
 }

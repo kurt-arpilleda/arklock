@@ -105,7 +105,16 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
+    override fun onResume() {
+        super.onResume()
+        // Ensure the service is running
+        val serviceIntent = Intent(this, AppLockService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+    }
     override fun onDestroy() {
         super.onDestroy()
 

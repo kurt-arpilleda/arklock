@@ -245,7 +245,15 @@ fun DashboardPage() {
                             val lockedApps = appsList
                                 .filter { it.isLocked }
                                 .map { it.packageName }
-                            saveLockedApps(context, lockedApps)
+                                .toSet()
+
+                            // Also clear any temporary unlock state for this app
+                            val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+                            with(sharedPref.edit()) {
+                                putStringSet("locked_apps", lockedApps)
+                                remove("temp_unlock_${app.packageName}")
+                                apply()
+                            }
                         }
                     )
                 }
