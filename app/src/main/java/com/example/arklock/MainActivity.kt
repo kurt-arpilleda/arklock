@@ -1,5 +1,7 @@
 package com.example.arklock
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -38,7 +40,19 @@ class MainActivity : ComponentActivity() {
         connectivityReceiver = NetworkUtils.ConnectivityReceiver {
             checkForUpdates()
         }
-        startLockService()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                "arklock_channel",
+                "ArkLock Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Notification channel for ArkLock service"
+            }
+
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.createNotificationChannel(channel)
+        }
+        startService(Intent(this, AppLockService::class.java))
         val filter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
         registerReceiver(connectivityReceiver, filter)
         observeNetworkChanges()
@@ -53,13 +67,6 @@ class MainActivity : ComponentActivity() {
                     AppNavigation()
                 }
             }
-        }
-    }
-    private fun startLockService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(Intent(this, ArkLockService::class.java))
-        } else {
-            startService(Intent(this, ArkLockService::class.java))
         }
     }
     private fun checkForUpdates() {

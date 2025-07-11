@@ -1,6 +1,8 @@
 package com.example.arklock
 
+import android.app.Activity
 import android.content.Context
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -33,7 +35,10 @@ import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.sqrt
 
 @Composable
-fun PasscodeScreen(onPasscodeVerified: () -> Unit) {
+fun PasscodeScreen(
+    onPasscodeVerified: () -> Unit,
+    appName: String? = null
+) {
     val context = LocalContext.current
     val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
     val passwordType = sharedPref.getString("password_type", "PIN") ?: "PIN"
@@ -43,6 +48,11 @@ fun PasscodeScreen(onPasscodeVerified: () -> Unit) {
     var inputPattern by remember { mutableStateOf(listOf<Int>()) }
     var showError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+
+    // Block recent apps button
+    LaunchedEffect(Unit) {
+        (context as? Activity)?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
 
     Column(
         modifier = Modifier
@@ -75,7 +85,7 @@ fun PasscodeScreen(onPasscodeVerified: () -> Unit) {
 
         // Title
         Text(
-            text = "Enter Passcode",
+            text = if (appName != null) "Locked: $appName" else "Enter Passcode",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
@@ -85,7 +95,11 @@ fun PasscodeScreen(onPasscodeVerified: () -> Unit) {
 
         // Subtitle
         Text(
-            text = "Enter your ${if (passwordType == "PIN") "PIN" else "pattern"} to continue",
+            text = if (appName != null) {
+                "Enter your ${if (passwordType == "PIN") "PIN" else "pattern"} to unlock"
+            } else {
+                "Enter your ${if (passwordType == "PIN") "PIN" else "pattern"} to continue"
+            },
             fontSize = 16.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
