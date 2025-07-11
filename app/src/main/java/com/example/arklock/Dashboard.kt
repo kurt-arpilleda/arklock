@@ -226,13 +226,11 @@ fun DashboardPage() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
+                // In DashboardPage composable, modify the onLockToggle parameter in the LazyColumn items
                 items(filteredApps) { app ->
                     AppItem(
                         app = app,
-                        onClick = {
-                            // TODO: Handle app selection
-                            // For now, this is just a placeholder
-                        },
+                        onClick = { /* ... */ },
                         onLockToggle = { isLocked ->
                             // Update the app's locked state
                             appsList = appsList.map {
@@ -242,6 +240,12 @@ fun DashboardPage() {
                                     it
                                 }
                             }
+
+                            // Save the updated list of locked apps
+                            val lockedApps = appsList
+                                .filter { it.isLocked }
+                                .map { it.packageName }
+                            saveLockedApps(context, lockedApps)
                         }
                     )
                 }
@@ -313,7 +317,7 @@ fun AppItem(
     onClick: () -> Unit,
     onLockToggle: (Boolean) -> Unit
 ) {
-    var isLocked by remember { mutableStateOf(app.isLocked) }
+    val isLocked = app.isLocked
 
     Card(
         modifier = Modifier
@@ -400,12 +404,10 @@ fun AppItem(
                 }
             }
 
-            // Lock Toggle Button
             IconToggleButton(
                 checked = isLocked,
-                onCheckedChange = {
-                    isLocked = it
-                    onLockToggle(it)
+                onCheckedChange = { newState ->
+                    onLockToggle(newState)
                 },
                 modifier = Modifier.size(48.dp)
             ) {
@@ -542,10 +544,19 @@ fun PasscodeVerificationContent(
         }
     }
 }
+private fun saveLockedApps(context: Context, packageNames: List<String>) {
+    val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+    sharedPref.edit().putStringSet("locked_apps", packageNames.toSet()).apply()
+}
+
+private fun loadLockedApps(context: Context): Set<String> {
+    val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+    return sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
+}
 private fun getAllInstalledApps(context: Context): List<AppInfo> {
     val packageManager = context.packageManager
     val apps = mutableListOf<AppInfo>()
-
+    val lockedApps = loadLockedApps(context)
     try {
         // Try multiple approaches to get all apps
         val installedApps = try {
@@ -586,7 +597,7 @@ private fun getAllInstalledApps(context: Context): List<AppInfo> {
                             icon = icon,
                             iconBitmap = iconBitmap,
                             isSystemApp = isSystemApp,
-                            isLocked = false // Default to unlocked
+                            isLocked = lockedApps.contains(packageName)
                         )
                     )
                 }
