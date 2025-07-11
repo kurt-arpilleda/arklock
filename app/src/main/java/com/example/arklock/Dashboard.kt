@@ -48,7 +48,6 @@ data class AppInfo(
 fun DashboardPage() {
     val context = LocalContext.current
     val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
-    val lockedAppsSharedPref = context.getSharedPreferences("arklock_locked_apps", Context.MODE_PRIVATE)
 
     var appsList by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -58,19 +57,9 @@ fun DashboardPage() {
     CheckRequiredPermissions()
 
     LaunchedEffect(Unit) {
-        val serviceIntent = Intent(context, ArkLockService::class.java)
-        context.startService(serviceIntent)
-    }
-
-    LaunchedEffect(Unit) {
         isLoading = true
         appsList = withContext(Dispatchers.IO) {
-            val allApps = getAllInstalledApps(context)
-            // Load saved lock states
-            allApps.map { app ->
-                val isLocked = lockedAppsSharedPref.getBoolean(app.packageName, false)
-                app.copy(isLocked = isLocked)
-            }
+            getAllInstalledApps(context)
         }
         isLoading = false
     }
@@ -324,7 +313,6 @@ fun AppItem(
     onClick: () -> Unit,
     onLockToggle: (Boolean) -> Unit
 ) {
-    val context = LocalContext.current
     var isLocked by remember { mutableStateOf(app.isLocked) }
 
     Card(
@@ -360,6 +348,7 @@ fun AppItem(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
+                    // Fallback icon if bitmap conversion fails
                     Icon(
                         Icons.Default.Apps,
                         contentDescription = null,
@@ -414,21 +403,9 @@ fun AppItem(
             // Lock Toggle Button
             IconToggleButton(
                 checked = isLocked,
-                onCheckedChange = { newLockState ->
-                    isLocked = newLockState
-                    onLockToggle(newLockState)
-
-                    // Save to SharedPreferences
-                    val sharedPref = context.getSharedPreferences("arklock_locked_apps", Context.MODE_PRIVATE)
-                    with(sharedPref.edit()) {
-                        putBoolean(app.packageName, newLockState)
-                        apply()
-                    }
-
-                    // If locking the app, remove it from unlocked apps
-                    if (newLockState) {
-                        ArkLockService.lockApp(app.packageName)
-                    }
+                onCheckedChange = {
+                    isLocked = it
+                    onLockToggle(it)
                 },
                 modifier = Modifier.size(48.dp)
             ) {
@@ -441,7 +418,6 @@ fun AppItem(
         }
     }
 }
-
 @Composable
 fun PasscodeVerificationDialog(
     onPasscodeVerified: () -> Unit,

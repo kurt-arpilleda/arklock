@@ -45,7 +45,7 @@
             android:foregroundServiceType="specialUse" />
 
         <activity
-            android:name=".LockScreenActivity"
+            android:name=".LockActivity"
             android:exported="false"
             android:theme="@style/Theme.ArkLock"
             android:launchMode="singleTop"
