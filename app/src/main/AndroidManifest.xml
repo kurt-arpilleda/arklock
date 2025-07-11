@@ -43,10 +43,18 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <activity
-            android:name=".LockActivity"
-            android:exported="false"
+            android:name=".LockScreenActivity"
+            android:exported="true"
             android:theme="@style/Theme.ArkLock"
             android:launchMode="singleTop"
             android:excludeFromRecents="true"
