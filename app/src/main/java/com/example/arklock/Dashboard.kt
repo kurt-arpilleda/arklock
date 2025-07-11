@@ -53,7 +53,7 @@ fun DashboardPage() {
     var isLoading by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     var showSystemApps by remember { mutableStateOf(false) }
-
+    var showPasscodeVerification by remember { mutableStateOf(false) }
     CheckRequiredPermissions()
 
     LaunchedEffect(Unit) {
@@ -136,11 +136,8 @@ fun DashboardPage() {
                 Spacer(modifier = Modifier.weight(1f))
                 IconButton(
                     onClick = {
-                        // Open password change screen
-                        val intent = Intent(context, PasswordActivity::class.java).apply {
-                            putExtra("isChangePassword", true)
-                        }
-                        context.startActivity(intent)
+                        // Show passcode verification instead of directly opening password change
+                        showPasscodeVerification = true
                     },
                     modifier = Modifier.size(48.dp)
                 ) {
@@ -292,6 +289,22 @@ fun DashboardPage() {
             }
         }
     }
+    if (showPasscodeVerification) {
+        PasscodeVerificationDialog(
+            onPasscodeVerified = {
+                showPasscodeVerification = false
+                // Open password change screen after verification
+                val intent = Intent(context, PasswordActivity::class.java).apply {
+                    putExtra("isChangePassword", true)
+                }
+                context.startActivity(intent)
+            },
+            onDismiss = {
+                showPasscodeVerification = false
+            }
+        )
+    }
+
 }
 
 @Composable
@@ -405,7 +418,130 @@ fun AppItem(
         }
     }
 }
+@Composable
+fun PasscodeVerificationDialog(
+    onPasscodeVerified: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Verify Identity",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
 
+                Text(
+                    text = "Please verify your passcode to change password",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                PasscodeVerificationContent(
+                    onPasscodeVerified = onPasscodeVerified,
+                    onCancel = onDismiss
+                )
+            }
+        }
+    }
+}
+@Composable
+fun PasscodeVerificationContent(
+    onPasscodeVerified: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val context = LocalContext.current
+    val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+    val passwordType = sharedPref.getString("password_type", "PIN") ?: "PIN"
+    val savedPassword = sharedPref.getString("password_value", "") ?: ""
+
+    var inputPin by remember { mutableStateOf("") }
+    var inputPattern by remember { mutableStateOf(listOf<Int>()) }
+    var showError by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf("") }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(16.dp)
+    ) {
+        if (showError) {
+            Text(
+                text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+        }
+
+        // PIN or Pattern Input
+        if (passwordType == "PIN") {
+            PinVerificationInput(
+                pin = inputPin,
+                onPinChange = { newPin ->
+                    if (newPin.length <= 6) {
+                        inputPin = newPin
+                        showError = false
+
+                        if (newPin.length == 6) {
+                            if (newPin == savedPassword) {
+                                onPasscodeVerified()
+                            } else {
+                                showError = true
+                                errorMessage = "Incorrect PIN. Try again."
+                                inputPin = ""
+                            }
+                        }
+                    }
+                }
+            )
+        } else {
+            PatternVerificationInput(
+                selectedPoints = inputPattern,
+                onPatternChange = { pattern ->
+                    inputPattern = pattern
+                    showError = false
+
+                    if (pattern.size >= 4) {
+                        val patternString = pattern.joinToString(",")
+                        if (patternString == savedPassword) {
+                            onPasscodeVerified()
+                        } else {
+                            showError = true
+                            errorMessage = "Incorrect pattern. Try again."
+                            inputPattern = listOf()
+                        }
+                    }
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Cancel button
+        TextButton(
+            onClick = onCancel,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Cancel")
+        }
+    }
+}
 private fun getAllInstalledApps(context: Context): List<AppInfo> {
     val packageManager = context.packageManager
     val apps = mutableListOf<AppInfo>()
