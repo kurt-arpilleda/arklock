@@ -1,4 +1,3 @@
-// AppLockService.kt
 package com.example.arklock
 
 import android.annotation.SuppressLint

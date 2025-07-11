@@ -68,9 +68,11 @@
             android:name=".LockActivity"
             android:exported="false"
             android:theme="@style/Theme.ArkLock"
-            android:launchMode="singleTask"
+            android:launchMode="singleTop"
             android:excludeFromRecents="true"
-            android:noHistory="true" />
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:allowTaskReparenting="false" />
 
         <uses-library android:name="org.apache.http.legacy" android:required="false" />
 
