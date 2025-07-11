@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var networkCallback: ConnectivityManager.NetworkCallback
     private val networkState = MutableStateFlow(false)
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
+    private lateinit var serviceWatchdog: ServiceWatchdog
 
     override fun onCreate(savedInstanceState: Bundle?) {
         RetrofitClient.updateWorkingUrl()
@@ -52,7 +53,9 @@ class MainActivity : ComponentActivity() {
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
-        startService(Intent(this, AppLockService::class.java))
+        serviceWatchdog = ServiceWatchdog(this)
+        serviceWatchdog.startWatching()
+        startAppLockService()
         val filter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
         registerReceiver(connectivityReceiver, filter)
         observeNetworkChanges()
@@ -74,6 +77,14 @@ class MainActivity : ComponentActivity() {
             if (NetworkUtils.isNetworkAvailable(this@MainActivity)) {
                 appUpdateService.checkForAppUpdate()
             }
+        }
+    }
+    private fun startAppLockService() {
+        val serviceIntent = Intent(this, AppLockService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
         }
     }
 
