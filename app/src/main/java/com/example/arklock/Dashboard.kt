@@ -132,6 +132,24 @@ fun DashboardPage() {
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                     )
                 }
+                // Add this inside the Row in the header Card, after the existing Column
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(
+                    onClick = {
+                        // Open password change screen
+                        val intent = Intent(context, PasswordActivity::class.java).apply {
+                            putExtra("isChangePassword", true)
+                        }
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = "Change Password",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
 

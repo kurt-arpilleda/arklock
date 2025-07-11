@@ -144,26 +144,6 @@ fun PasscodeScreen(onPasscodeVerified: () -> Unit) {
                 }
             )
         }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        // Optional: Forgot passcode option
-        TextButton(
-            onClick = {
-                // You can implement forgot passcode functionality here
-                // For now, we'll just show a message
-                showError = true
-                errorMessage = "Contact support to reset your passcode"
-            }
-        ) {
-            Text(
-                text = "Forgot Passcode?",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 14.sp
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
     }
 }
 

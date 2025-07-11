@@ -1,6 +1,7 @@
 package com.example.arklock
 
 import android.content.Context
+import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -35,7 +37,10 @@ import kotlin.math.sqrt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PasswordScreen(onPasswordSaved: (String) -> Unit) {
+fun PasswordScreen(
+    isChangePassword: Boolean = false,
+    onPasswordSaved: (String) -> Unit
+) {
     val context = LocalContext.current
     var step by remember { mutableStateOf(1) }
     var passwordType by remember { mutableStateOf("PIN") }
@@ -54,19 +59,47 @@ fun PasswordScreen(onPasswordSaved: (String) -> Unit) {
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(modifier = Modifier.height(40.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (isChangePassword) {
+                    IconButton(
+                        onClick = {
+                            (context as? ComponentActivity)?.finish()
+                        },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .offset(x = (-12).dp) // Optional subtle left shift
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                } else {
+                    Spacer(modifier = Modifier.width(48.dp)) // Same width as icon button
+                }
+            }
 
-        // Title (Smaller size)
-        Text(
-            text = "Set Passcode",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
-        )
+            Text(
+                text = if (isChangePassword) "Change Passcode" else "Set Passcode",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Progress Indicator (Smaller size)
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
