@@ -1,11 +1,13 @@
 package com.example.arklock
 
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -36,6 +38,7 @@ class MainActivity : ComponentActivity() {
         connectivityReceiver = NetworkUtils.ConnectivityReceiver {
             checkForUpdates()
         }
+        startLockService()
         val filter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
         registerReceiver(connectivityReceiver, filter)
         observeNetworkChanges()
@@ -52,7 +55,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
+    private fun startLockService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(Intent(this, ArkLockService::class.java))
+        } else {
+            startService(Intent(this, ArkLockService::class.java))
+        }
+    }
     private fun checkForUpdates() {
         coroutineScope.launch {
             if (NetworkUtils.isNetworkAvailable(this@MainActivity)) {
