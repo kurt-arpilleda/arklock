@@ -20,6 +20,8 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -44,12 +46,29 @@ class AppLockService : Service() {
     private var alarmPendingIntent: PendingIntent? = null
     private var heartbeatPendingIntent: PendingIntent? = null
     private var restartPendingIntent: PendingIntent? = null
+    private var keepAlivePendingIntent: PendingIntent? = null
+    private var powerManager: PowerManager? = null
+    private var isIgnoringBatteryOptimizations = false
 
     private val wakeLock by lazy {
         (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
-            newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ArkLock:AppLockWakeLock")
+            newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "ArkLock:AppLockWakeLock"
+            )
         }
     }
+
+    // Additional wake lock for critical operations
+    private val criticalWakeLock by lazy {
+        (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
+            newWakeLock(
+                PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "ArkLock:CriticalWakeLock"
+            )
+        }
+    }
+
     private fun startWithHighPriority() {
         val intent = Intent(this, AppLockService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -58,27 +77,42 @@ class AppLockService : Service() {
             startService(intent)
         }
         startMonitoring()
+        acquireWakeLocks()
+    }
+
+    private fun acquireWakeLocks() {
         try {
             if (!wakeLock.isHeld) {
-                wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/)
+                wakeLock.acquire(24 * 60 * 60 * 1000L /*24 hours*/)
+            }
+            // Acquire critical wake lock for shorter periods
+            if (!criticalWakeLock.isHeld) {
+                criticalWakeLock.acquire(30 * 60 * 1000L /*30 minutes*/)
             }
         } catch (e: Exception) {
             // Handle exception
         }
     }
+
     companion object {
         private const val CHANNEL_ID = "app_lock_channel"
+        private const val CRITICAL_CHANNEL_ID = "app_lock_critical_channel"
         private const val NOTIFICATION_ID = 2
-        private const val ALARM_INTERVAL = 10 * 60 * 1000L // 10 minutes
-        private const val HEARTBEAT_INTERVAL = 5 * 60 * 1000L // 5 minutes
-        private const val RESTART_INTERVAL = 30 * 1000L // 30 seconds
+        private const val CRITICAL_NOTIFICATION_ID = 3
+        private const val ALARM_INTERVAL = 5 * 60 * 1000L // 5 minutes (reduced)
+        private const val HEARTBEAT_INTERVAL = 2 * 60 * 1000L // 2 minutes (reduced)
+        private const val RESTART_INTERVAL = 15 * 1000L // 15 seconds (reduced)
+        private const val KEEP_ALIVE_INTERVAL = 30 * 1000L // 30 seconds
         private const val ALARM_REQUEST_CODE = 1001
         private const val HEARTBEAT_REQUEST_CODE = 1002
         private const val RESTART_REQUEST_CODE = 1003
+        private const val KEEP_ALIVE_REQUEST_CODE = 1004
 
         const val ACTION_ALARM_TRIGGER = "com.example.arklock.ALARM_TRIGGER"
         const val ACTION_HEARTBEAT = "com.example.arklock.HEARTBEAT"
         const val ACTION_RESTART_SERVICE = "com.example.arklock.RESTART_SERVICE"
+        const val ACTION_KEEP_ALIVE = "com.example.arklock.KEEP_ALIVE"
+        const val ACTION_CRITICAL_OPERATION = "com.example.arklock.CRITICAL_OPERATION"
 
         fun startService(context: Context) {
             val intent = Intent(context, AppLockService::class.java)
@@ -87,36 +121,43 @@ class AppLockService : Service() {
             } else {
                 context.startService(intent)
             }
-            if (context is AppLockService) {
-                context.startWithHighPriority()
-            }
         }
-        fun createForegroundInfo(context: Context): ForegroundInfo {
-            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setContentTitle("ArkLock is running")
-                .setContentText("Monitoring app usage")
-                .setSmallIcon(R.drawable.ic_notification)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
-                .build()
 
+        fun createForegroundInfo(context: Context): ForegroundInfo {
+            val notification = createHighPriorityNotification(context)
             return ForegroundInfo(NOTIFICATION_ID, notification)
         }
+
+        private fun createHighPriorityNotification(context: Context): Notification {
+            return NotificationCompat.Builder(context, CRITICAL_CHANNEL_ID)
+                .setContentTitle("ArkLock Protection Active")
+                .setContentText("Security monitoring in progress")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_SYSTEM)
+                .setOngoing(true)
+                .setAutoCancel(false)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .build()
+        }
+
         fun scheduleWorkManager(context: Context) {
             val constraints = Constraints.Builder()
-                .setRequiresBatteryNotLow(true)
-                .setRequiresStorageNotLow(true)
+                .setRequiresBatteryNotLow(false) // Don't require battery not low
+                .setRequiresStorageNotLow(false) // Don't require storage not low
                 .build()
 
             val workRequest = PeriodicWorkRequestBuilder<AppLockWorker>(
-                15, TimeUnit.MINUTES // Minimum interval
+                15, TimeUnit.MINUTES
             ).setConstraints(constraints)
+                .setInitialDelay(1, TimeUnit.MINUTES)
                 .build()
 
             WorkManager.getInstance(context)
                 .enqueueUniquePeriodicWork(
                     "AppLockWorker",
-                    ExistingPeriodicWorkPolicy.UPDATE,
+                    ExistingPeriodicWorkPolicy.KEEP,
                     workRequest
                 )
         }
@@ -132,14 +173,17 @@ class AppLockService : Service() {
                     .setPeriodic(15 * 60 * 1000) // 15 minutes
                     .setPersisted(true)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_NONE)
-                    .setRequiresBatteryNotLow(true)
-                    .setRequiresStorageNotLow(true)
+                    .setRequiresBatteryNotLow(false)
+                    .setRequiresStorageNotLow(false)
+                    .setRequiresCharging(false)
+                    .setRequiresDeviceIdle(false)
                     .build()
             } else {
                 JobInfo.Builder(JOB_ID, component)
                     .setPeriodic(15 * 60 * 1000)
                     .setPersisted(true)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_NONE)
+                    .setRequiresCharging(false)
                     .build()
             }
 
@@ -178,6 +222,38 @@ class AppLockService : Service() {
                 // Handle exception
             }
         }
+
+        // Method to check if battery optimization is disabled
+        fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                powerManager.isIgnoringBatteryOptimizations(context.packageName)
+            } else {
+                true
+            }
+        }
+
+        // Method to request battery optimization whitelist
+        fun requestBatteryOptimizationWhitelist(context: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+                if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    try {
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        // Fallback to battery optimization settings
+                        val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        context.startActivity(fallbackIntent)
+                    }
+                }
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -186,21 +262,52 @@ class AppLockService : Service() {
         super.onCreate()
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        createNotificationChannel()
+        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        // Check battery optimization status
+        isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations(this)
+
+        createNotificationChannels()
         startForeground()
         startMonitoring()
         registerAlarmReceiver()
+
+        // Schedule all keep-alive mechanisms
         scheduleNextAlarm()
         scheduleNextHeartbeat()
+        scheduleKeepAlive()
         scheduleServiceRestart()
-
-        // Add these lines:
         scheduleWorkManager(this)
         scheduleJobScheduler(this)
+
+        // Acquire wake locks
+        acquireWakeLocks()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_CRITICAL_OPERATION -> {
+                // Handle critical operations that need to bypass power saving
+                handleCriticalOperation()
+            }
+            ACTION_KEEP_ALIVE -> {
+                // Keep alive ping
+                refreshWakeLock()
+                scheduleKeepAlive()
+            }
+        }
         return START_STICKY
+    }
+
+    private fun handleCriticalOperation() {
+        // Acquire critical wake lock for important operations
+        try {
+            if (!criticalWakeLock.isHeld) {
+                criticalWakeLock.acquire(5 * 60 * 1000L /*5 minutes*/)
+            }
+        } catch (e: Exception) {
+            // Handle exception
+        }
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -209,6 +316,11 @@ class AppLockService : Service() {
             addAction(ACTION_ALARM_TRIGGER)
             addAction(ACTION_HEARTBEAT)
             addAction(ACTION_RESTART_SERVICE)
+            addAction(ACTION_KEEP_ALIVE)
+            addAction(ACTION_CRITICAL_OPERATION)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -232,13 +344,70 @@ class AppLockService : Service() {
                     scheduleNextHeartbeat()
                 }
                 ACTION_RESTART_SERVICE -> {
-                    // Service restart logic
                     if (monitoringJob?.isActive != true) {
                         startMonitoring()
                     }
                     scheduleServiceRestart()
                 }
+                ACTION_KEEP_ALIVE -> {
+                    refreshWakeLock()
+                    scheduleKeepAlive()
+                }
+                ACTION_CRITICAL_OPERATION -> {
+                    handleCriticalOperation()
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    // Screen turned on, refresh monitoring
+                    refreshWakeLock()
+                    if (monitoringJob?.isActive != true) {
+                        startMonitoring()
+                    }
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    // Screen turned off, ensure wake locks are held
+                    acquireWakeLocks()
+                }
+                Intent.ACTION_USER_PRESENT -> {
+                    // User unlocked device, refresh monitoring
+                    refreshWakeLock()
+                    if (monitoringJob?.isActive != true) {
+                        startMonitoring()
+                    }
+                }
             }
+        }
+    }
+
+    private fun scheduleKeepAlive() {
+        val keepAliveIntent = Intent(this, AppLockService::class.java).apply {
+            action = ACTION_KEEP_ALIVE
+        }
+
+        keepAlivePendingIntent = PendingIntent.getService(
+            this,
+            KEEP_ALIVE_REQUEST_CODE,
+            keepAliveIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val triggerTime = System.currentTimeMillis() + KEEP_ALIVE_INTERVAL
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    keepAlivePendingIntent!!
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    keepAlivePendingIntent!!
+                )
+            }
+        } catch (e: Exception) {
+            // Handle exception
         }
     }
 
@@ -277,8 +446,14 @@ class AppLockService : Service() {
 
     private fun refreshWakeLock() {
         try {
+            // Refresh primary wake lock
             if (!wakeLock.isHeld) {
-                wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/)
+                wakeLock.acquire(24 * 60 * 60 * 1000L /*24 hours*/)
+            }
+
+            // Refresh critical wake lock periodically
+            if (!criticalWakeLock.isHeld) {
+                criticalWakeLock.acquire(30 * 60 * 1000L /*30 minutes*/)
             }
         } catch (e: Exception) {
             // Handle exception
@@ -370,10 +545,15 @@ class AppLockService : Service() {
             alarmManager.cancel(it)
             restartPendingIntent = null
         }
+        keepAlivePendingIntent?.let {
+            alarmManager.cancel(it)
+            keepAlivePendingIntent = null
+        }
     }
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Regular channel
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
                 "App Lock Service",
@@ -381,9 +561,26 @@ class AppLockService : Service() {
             ).apply {
                 description = "Notification channel for app lock service"
                 setShowBadge(false)
+                enableLights(false)
+                enableVibration(false)
             }
+
+            // Critical channel with high importance
+            val criticalChannel = NotificationChannel(
+                CRITICAL_CHANNEL_ID,
+                "App Lock Critical",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Critical notifications for app lock service"
+                setShowBadge(true)
+                enableLights(true)
+                enableVibration(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(serviceChannel)
+            manager.createNotificationChannel(criticalChannel)
         }
     }
 
@@ -404,23 +601,23 @@ class AppLockService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ArkLock is running")
-            .setContentText("Monitoring app usage")
+        return NotificationCompat.Builder(this, CRITICAL_CHANNEL_ID)
+            .setContentTitle("ArkLock Protection Active")
+            .setContentText("Security monitoring in progress - Do not disable")
             .setSmallIcon(R.drawable.ic_notification)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_SYSTEM)
             .setOngoing(true)
+            .setAutoCancel(false)
             .setContentIntent(pendingIntent)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
+
     private fun startMonitoring() {
-        try {
-            if (!wakeLock.isHeld) {
-                wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/)
-            }
-        } catch (e: Exception) {
-            // Handle exception
-        }
+        // Acquire wake locks before starting monitoring
+        acquireWakeLocks()
 
         monitoringJob?.cancel()
         monitoringJob = scope.launch {
@@ -431,7 +628,7 @@ class AppLockService : Service() {
                         lastForegroundApp = currentApp
                         checkAndLockApp(currentApp)
                     }
-                    delay(300) // Check every 300ms
+                    delay(200) // Check every 200ms (more frequent)
                 } catch (e: Exception) {
                     // Handle exception and continue monitoring
                     delay(1000) // Wait a bit longer if there's an error
@@ -481,6 +678,9 @@ class AppLockService : Service() {
                 return
             }
 
+            // Trigger critical operation before showing lock screen
+            handleCriticalOperation()
+
             val intent = Intent(this, LockActivity::class.java).apply {
                 putExtra("package_name", packageName)
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -496,23 +696,39 @@ class AppLockService : Service() {
     }
 
     override fun onDestroy() {
+        // Schedule multiple restart mechanisms
         scheduleServiceRestart(this)
+        scheduleWorkManager(this)
+        scheduleJobScheduler(this)
+
         stopMonitoring()
-        if (wakeLock.isHeld) {
-            wakeLock.release()
+
+        // Release wake locks
+        try {
+            if (wakeLock.isHeld) {
+                wakeLock.release()
+            }
+            if (criticalWakeLock.isHeld) {
+                criticalWakeLock.release()
+            }
+        } catch (e: Exception) {
+            // Handle exception
         }
+
         cancelAlarms()
+
         try {
             unregisterReceiver(alarmReceiver)
         } catch (e: IllegalArgumentException) {
             // Receiver was not registered
         }
-        scheduleWorkManager(this)
+
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         scheduleServiceRestart(this)
+        scheduleWorkManager(this)
         super.onTaskRemoved(rootIntent)
     }
 }
