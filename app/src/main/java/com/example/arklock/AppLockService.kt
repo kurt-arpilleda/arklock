@@ -3,12 +3,16 @@ package com.example.arklock
 import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
 import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -17,6 +21,11 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ForegroundInfo
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -82,6 +91,62 @@ class AppLockService : Service() {
                 context.startWithHighPriority()
             }
         }
+        fun createForegroundInfo(context: Context): ForegroundInfo {
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setContentTitle("ArkLock is running")
+                .setContentText("Monitoring app usage")
+                .setSmallIcon(R.drawable.ic_notification)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
+                .build()
+
+            return ForegroundInfo(NOTIFICATION_ID, notification)
+        }
+        fun scheduleWorkManager(context: Context) {
+            val constraints = Constraints.Builder()
+                .setRequiresBatteryNotLow(true)
+                .setRequiresStorageNotLow(true)
+                .build()
+
+            val workRequest = PeriodicWorkRequestBuilder<AppLockWorker>(
+                15, TimeUnit.MINUTES // Minimum interval
+            ).setConstraints(constraints)
+                .build()
+
+            WorkManager.getInstance(context)
+                .enqueueUniquePeriodicWork(
+                    "AppLockWorker",
+                    ExistingPeriodicWorkPolicy.UPDATE,
+                    workRequest
+                )
+        }
+
+        @SuppressLint("ServiceCast")
+        fun scheduleJobScheduler(context: Context) {
+            val jobScheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
+
+            val component = ComponentName(context, AppLockJobService::class.java)
+
+            val jobInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                JobInfo.Builder(JOB_ID, component)
+                    .setPeriodic(15 * 60 * 1000) // 15 minutes
+                    .setPersisted(true)
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_NONE)
+                    .setRequiresBatteryNotLow(true)
+                    .setRequiresStorageNotLow(true)
+                    .build()
+            } else {
+                JobInfo.Builder(JOB_ID, component)
+                    .setPeriodic(15 * 60 * 1000)
+                    .setPersisted(true)
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_NONE)
+                    .build()
+            }
+
+            jobScheduler.schedule(jobInfo)
+        }
+
+        private const val JOB_ID = 1001
 
         fun scheduleServiceRestart(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -128,6 +193,10 @@ class AppLockService : Service() {
         scheduleNextAlarm()
         scheduleNextHeartbeat()
         scheduleServiceRestart()
+
+        // Add these lines:
+        scheduleWorkManager(this)
+        scheduleJobScheduler(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -319,17 +388,31 @@ class AppLockService : Service() {
     }
 
     private fun startForeground() {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+        val notification = createNotification()
+        startForeground(NOTIFICATION_ID, notification)
+    }
+
+    private fun createNotification(): Notification {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("ArkLock is running")
             .setContentText("Monitoring app usage")
             .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
+            .setContentIntent(pendingIntent)
             .build()
-
-        startForeground(NOTIFICATION_ID, notification)
     }
-
     private fun startMonitoring() {
         try {
             if (!wakeLock.isHeld) {
@@ -422,7 +505,9 @@ class AppLockService : Service() {
         try {
             unregisterReceiver(alarmReceiver)
         } catch (e: IllegalArgumentException) {
+            // Receiver was not registered
         }
+        scheduleWorkManager(this)
         super.onDestroy()
     }
 
