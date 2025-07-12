@@ -95,7 +95,8 @@
         <service
             android:name=".AppLockJobService"
             android:permission="android.permission.BIND_JOB_SERVICE"
-            android:exported="true" />
+            android:enabled="true"
+            android:exported="false"/>
         <activity
             android:name=".LockActivity"
             android:exported="false"
