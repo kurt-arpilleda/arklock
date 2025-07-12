@@ -24,7 +24,6 @@ class AppLockService : Service() {
     private var isUnlockedTemporarily = false
     private var tempUnlockedPackage = ""
     private lateinit var sharedPref: SharedPreferences
-    private var lastCheckTime = 0L
 
     private val wakeLock by lazy {
         (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
@@ -41,24 +40,9 @@ class AppLockService : Service() {
         startMonitoring()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Always restart if killed
-        if (monitoringJob?.isActive != true) {
-            startMonitoring()
-        }
-        return START_STICKY // Critical: Auto-restart if killed
-    }
-
     override fun onDestroy() {
         stopMonitoring()
-        if (wakeLock.isHeld) {
-            wakeLock.release()
-        }
-
-        // Restart service
-        val restartIntent = Intent(this, AppLockService::class.java)
-        startService(restartIntent)
-
+        wakeLock.release()
         super.onDestroy()
     }
 
@@ -68,44 +52,21 @@ class AppLockService : Service() {
             .setContentText("Monitoring app usage")
             .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true) // Make it persistent
-            .setAutoCancel(false)
             .build()
 
         startForeground(1, notification)
     }
 
     private fun startMonitoring() {
-        if (!wakeLock.isHeld) {
-            wakeLock.acquire(60 * 60 * 1000L) // 1 hour, will be renewed
-        }
-
+        wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/)
         monitoringJob = scope.launch {
             while (true) {
-                try {
-                    val currentTime = System.currentTimeMillis()
-
-                    // Renew wakelock every 30 minutes
-                    if (currentTime - lastCheckTime > 30 * 60 * 1000L) {
-                        if (wakeLock.isHeld) {
-                            wakeLock.release()
-                        }
-                        wakeLock.acquire(60 * 60 * 1000L)
-                        lastCheckTime = currentTime
-                    }
-
-                    val currentApp = getForegroundApp()
-                    if (currentApp != lastForegroundApp && currentApp.isNotEmpty()) {
-                        lastForegroundApp = currentApp
-                        checkAndLockApp(currentApp)
-                    }
-
-                    delay(500) // Slightly longer interval for better performance
-                } catch (e: Exception) {
-                    // Log error but continue monitoring
-                    e.printStackTrace()
-                    delay(1000)
+                val currentApp = getForegroundApp()
+                if (currentApp != lastForegroundApp) {
+                    lastForegroundApp = currentApp
+                    checkAndLockApp(currentApp)
                 }
+                delay(300) // Check every 300ms
             }
         }
     }
@@ -116,25 +77,22 @@ class AppLockService : Service() {
 
     @SuppressLint("ServiceCast")
     private fun getForegroundApp(): String {
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
-                val now = System.currentTimeMillis()
-                val stats = usageStatsManager.queryUsageStats(
-                    UsageStatsManager.INTERVAL_DAILY,
-                    now - 2000, // Reduced time window
-                    now
-                )
-                stats?.filter { it.lastTimeUsed >= now - 2000 }
-                    ?.maxByOrNull { it.lastTimeUsed }
-                    ?.packageName ?: ""
-            } else {
-                val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                val tasks = am.getRunningTasks(1)
-                tasks?.firstOrNull()?.topActivity?.packageName ?: ""
-            }
-        } catch (e: Exception) {
-            ""
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val now = System.currentTimeMillis()
+            val stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                now - 1000 * 1000,
+                now
+            )
+            stats?.filter { it.lastTimeUsed >= now - 1000 * 1000 }
+                ?.maxByOrNull { it.lastTimeUsed }
+                ?.packageName ?: ""
+        } else {
+            // Fallback for older versions (less reliable)
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val tasks = am.getRunningTasks(1)
+            tasks?.firstOrNull()?.topActivity?.packageName ?: ""
         }
     }
 
@@ -149,7 +107,7 @@ class AppLockService : Service() {
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
 
         if (lockedApps.contains(packageName)) {
-            // Check if this is a temporary unlock
+            // Check if this is a temporary unlock (like when coming back from LockActivity)
             if (sharedPref.getBoolean("temp_unlock_$packageName", false)) {
                 sharedPref.edit().remove("temp_unlock_$packageName").apply()
                 tempUnlockedPackage = packageName
@@ -159,9 +117,7 @@ class AppLockService : Service() {
 
             val intent = Intent(this, LockActivity::class.java).apply {
                 putExtra("package_name", packageName)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
-                        Intent.FLAG_ACTIVITY_NO_HISTORY
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }
             startActivity(intent)
         } else {
