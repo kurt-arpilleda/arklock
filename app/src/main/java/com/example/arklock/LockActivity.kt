@@ -32,26 +32,15 @@ class LockActivity : ComponentActivity() {
                 onUnlock = {
                     // Mark this app as temporarily unlocked
                     sharedPref.edit().putBoolean("temp_unlock_$packageName", true).apply()
-                    finishAndRemoveTask()
 
-                    // Launch the original app
-                    try {
-                        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-                        startActivity(launchIntent)
-                    } catch (e: Exception) {
-                        // Fallback to home if app can't be launched
-                        val startMain = Intent(Intent.ACTION_MAIN)
-                        startMain.addCategory(Intent.CATEGORY_HOME)
-                        startMain.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        startActivity(startMain)
-                    }
+                    // Simply finish the activity - don't relaunch the app
+                    finishAndRemoveTask()
                 }
             )
         }
     }
 
     override fun onBackPressed() {
-        super.onBackPressed()
         // Prevent going back - force user to enter correct passcode
         moveToHomeScreen()
     }
