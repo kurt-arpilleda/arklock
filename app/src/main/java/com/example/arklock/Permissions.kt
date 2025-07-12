@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
@@ -31,8 +33,8 @@ fun CheckRequiredPermissions() {
     var showBatteryOptimizationDialog by remember { mutableStateOf(false) }
     var displayOverAppsEnabled by remember { mutableStateOf(false) }
     var usageAccessEnabled by remember { mutableStateOf(false) }
+    var showManufacturerSettingsDialog by remember { mutableStateOf(false) }
 
-    // Function to check all permissions
     fun checkPermissions() {
         displayOverAppsEnabled = canDisplayOverOtherApps(context)
         usageAccessEnabled = hasUsageAccessPermission(context)
@@ -40,10 +42,15 @@ fun CheckRequiredPermissions() {
 
         // Only check battery optimization if permissions are already granted
         if (!showPermissionDialog) {
-            showBatteryOptimizationDialog = !isBatteryOptimizationDisabled(context)
+            val batteryOptimized = !isBatteryOptimizationDisabled(context)
+            showBatteryOptimizationDialog = batteryOptimized
+
+            // Only show manufacturer settings if everything else is done
+            if (!batteryOptimized) {
+                showManufacturerSettingsDialog = !isManufacturerSpecificSettingsDone(context)
+            }
         }
     }
-
     // Check permissions when composable is launched
     LaunchedEffect(Unit) {
         checkPermissions()
@@ -89,6 +96,166 @@ fun CheckRequiredPermissions() {
                 openBatteryOptimizationSettings(context)
             }
         )
+    }
+    if (showManufacturerSettingsDialog) {
+        ManufacturerSettingsDialog(
+            onDismiss = {
+                val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+                sharedPref.edit().putBoolean("manufacturer_settings_shown", true).apply()
+                showManufacturerSettingsDialog = false
+            }
+        )
+    }
+}
+@Composable
+fun ManufacturerSettingsDialog(
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Important Device Settings",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                Text(
+                    text = "For ArkLock to work properly on some devices, please make sure to configure these additional settings:",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                // Auto-start setting
+                Row(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "1",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "Enable Auto-Start",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Allow ArkLock to start automatically after device reboot",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Power saving setting
+                Row(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "2",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "Disable Power Saving Restrictions",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Set ArkLock to 'No Restrictions' in Power Saving settings",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "These settings are usually found in:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                Text(
+                    text = "• Settings → Apps → Special app access → Auto-start\n" +
+                            "• Settings → Battery → Power saving management",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text(
+                        text = "I Understand",
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+        }
     }
 }
 @Composable
@@ -372,7 +539,11 @@ private fun openBatteryOptimizationSettings(context: Context) {
 private fun canDisplayOverOtherApps(context: Context): Boolean {
     return Settings.canDrawOverlays(context)
 }
-
+private fun isManufacturerSpecificSettingsDone(context: Context): Boolean {
+    // This is hard to check programmatically, so we'll just track if user has seen the dialog
+    val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
+    return sharedPref.getBoolean("manufacturer_settings_shown", false)
+}
 private fun hasUsageAccessPermission(context: Context): Boolean {
     val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
     val mode = appOps.checkOpNoThrow(

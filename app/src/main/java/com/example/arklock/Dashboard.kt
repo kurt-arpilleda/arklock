@@ -136,7 +136,6 @@ fun DashboardPage() {
                 Spacer(modifier = Modifier.weight(1f))
                 IconButton(
                     onClick = {
-                        // Show passcode verification instead of directly opening password change
                         showPasscodeVerification = true
                     },
                     modifier = Modifier.size(48.dp)
@@ -226,7 +225,6 @@ fun DashboardPage() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
-                // In DashboardPage composable, modify the onLockToggle parameter in the LazyColumn items
                 items(filteredApps) { app ->
                     AppItem(
                         app = app,
@@ -360,7 +358,6 @@ fun AppItem(
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {
-                    // Fallback icon if bitmap conversion fails
                     Icon(
                         Icons.Default.Apps,
                         contentDescription = null,
@@ -374,7 +371,6 @@ fun AppItem(
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // App Info
             Column(
                 modifier = Modifier.weight(1f)
             ) {
@@ -395,7 +391,6 @@ fun AppItem(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                // System app indicator
                 if (app.isSystemApp) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Surface(
@@ -566,32 +561,25 @@ private fun getAllInstalledApps(context: Context): List<AppInfo> {
     val apps = mutableListOf<AppInfo>()
     val lockedApps = loadLockedApps(context)
     try {
-        // Try multiple approaches to get all apps
         val installedApps = try {
-            // First try: Get all applications with QUERY_ALL_PACKAGES permission
             packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
         } catch (e: Exception) {
-            // Fallback: Get applications through installed packages
             val packages = packageManager.getInstalledPackages(PackageManager.GET_META_DATA)
             packages.map { it.applicationInfo }
         }
 
         for (appInfo in installedApps) {
             try {
-                // Skip apps that don't have a launcher activity (unless they're system apps we want to show)
                 val launchIntent = packageManager.getLaunchIntentForPackage(appInfo.packageName)
                 val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
 
-                // Include app if it has a launcher intent OR if it's a well-known system app
                 if (launchIntent != null || isSystemApp) {
                     val appName = packageManager.getApplicationLabel(appInfo).toString()
                     val packageName = appInfo.packageName
                     val icon = packageManager.getApplicationIcon(appInfo)
-
-                    // Convert icon to bitmap safely
                     val iconBitmap = try {
                         icon.toBitmap(
-                            width = 144, // 48dp * 3 for better quality
+                            width = 144,
                             height = 144
                         )
                     } catch (e: Exception) {
@@ -610,21 +598,17 @@ private fun getAllInstalledApps(context: Context): List<AppInfo> {
                     )
                 }
             } catch (e: Exception) {
-                // Skip apps that can't be processed
                 continue
             }
         }
 
-        // Also try to get apps from specific categories
         val additionalApps = getAppsFromIntent(context, packageManager)
         apps.addAll(additionalApps)
 
     } catch (e: Exception) {
-        // Handle any errors during app fetching
         e.printStackTrace()
     }
 
-    // Remove duplicates and sort apps alphabetically by name
     return apps.distinctBy { it.packageName }.sortedBy { it.name.lowercase() }
 }
 
@@ -632,7 +616,6 @@ private fun getAppsFromIntent(context: Context, packageManager: PackageManager):
     val apps = mutableListOf<AppInfo>()
 
     try {
-        // Get all apps that can be launched (have MAIN/LAUNCHER intent)
         val intent = Intent(Intent.ACTION_MAIN, null)
         intent.addCategory(Intent.CATEGORY_LAUNCHER)
 
@@ -646,7 +629,6 @@ private fun getAppsFromIntent(context: Context, packageManager: PackageManager):
                 val icon = packageManager.getApplicationIcon(appInfo)
                 val isSystemApp = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
 
-                // Convert icon to bitmap safely
                 val iconBitmap = try {
                     icon.toBitmap(
                         width = 144,
@@ -663,7 +645,7 @@ private fun getAppsFromIntent(context: Context, packageManager: PackageManager):
                         icon = icon,
                         iconBitmap = iconBitmap,
                         isSystemApp = isSystemApp,
-                        isLocked = false // Default to unlocked
+                        isLocked = false
                     )
                 )
             } catch (e: Exception) {
