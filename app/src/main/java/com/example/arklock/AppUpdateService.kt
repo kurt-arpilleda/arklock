@@ -83,7 +83,7 @@ class AppUpdateService(private val context: Context) {
     private fun downloadFileWithRetry(fileName: String, destinationFile: File, attempt: Int) {
         // Choose URL based on attempt (alternate between primary and fallback)
         val baseUrl = if (attempt % 2 == 0) RetrofitClient.PRIMARY_URL else RetrofitClient.FALLBACK_URL
-        val url = "$baseUrl/V4/Others/Kurt/LatestVersionAPK/Paging/$fileName"
+        val url = "$baseUrl/V4/Others/Kurt/LatestVersionAPK/ArkLock/$fileName"
 
         Thread {
             var downloadedBytes: Long = 0
