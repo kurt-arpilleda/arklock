@@ -4,33 +4,23 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 
-class AppLaunchReceiver : BroadcastReceiver() {
+class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED,
-            Intent.ACTION_MY_PACKAGE_REPLACED,
-            Intent.ACTION_PACKAGE_REPLACED,
-            "android.intent.action.QUICKBOOT_POWERON" -> {
-                startAppLockService(context)
-            }
-            Intent.ACTION_SCREEN_ON -> {
-                // Restart service when screen turns on
-                startAppLockService(context)
-            }
-            Intent.ACTION_USER_PRESENT -> {
-                // User unlocked the device
-                startAppLockService(context)
-            }
-        }
-    }
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
+            intent.action == Intent.ACTION_REBOOT) {
 
-    private fun startAppLockService(context: Context) {
-        val serviceIntent = Intent(context, AppLockService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(serviceIntent)
-        } else {
-            context.startService(serviceIntent)
+            Log.d("BootReceiver", "Device booted, starting AppLockService")
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(Intent(context, AppLockService::class.java))
+            } else {
+                context.startService(Intent(context, AppLockService::class.java))
+            }
+
+            AppLockService.scheduleServiceRestart(context)
         }
     }
 }

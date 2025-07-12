@@ -41,7 +41,22 @@ class AppLockService : Service() {
             newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ArkLock:AppLockWakeLock")
         }
     }
-
+    private fun startWithHighPriority() {
+        val intent = Intent(this, AppLockService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        startMonitoring()
+        try {
+            if (!wakeLock.isHeld) {
+                wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/)
+            }
+        } catch (e: Exception) {
+            // Handle exception
+        }
+    }
     companion object {
         private const val CHANNEL_ID = "app_lock_channel"
         private const val NOTIFICATION_ID = 2
@@ -62,6 +77,9 @@ class AppLockService : Service() {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
+            }
+            if (context is AppLockService) {
+                context.startWithHighPriority()
             }
         }
 
