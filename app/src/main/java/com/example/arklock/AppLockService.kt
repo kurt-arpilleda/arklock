@@ -35,6 +35,7 @@ class AppLockService : Service() {
     private lateinit var alarmManager: AlarmManager
     private var alarmPendingIntent: PendingIntent? = null
     private var heartbeatPendingIntent: PendingIntent? = null
+    private var restartPendingIntent: PendingIntent? = null
 
     private val wakeLock by lazy {
         (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
@@ -47,11 +48,14 @@ class AppLockService : Service() {
         private const val NOTIFICATION_ID = 2
         private const val ALARM_INTERVAL = 10 * 60 * 1000L // 10 minutes
         private const val HEARTBEAT_INTERVAL = 5 * 60 * 1000L // 5 minutes
+        private const val RESTART_INTERVAL = 30 * 1000L // 30 seconds
         private const val ALARM_REQUEST_CODE = 1001
         private const val HEARTBEAT_REQUEST_CODE = 1002
+        private const val RESTART_REQUEST_CODE = 1003
 
         const val ACTION_ALARM_TRIGGER = "com.example.arklock.ALARM_TRIGGER"
         const val ACTION_HEARTBEAT = "com.example.arklock.HEARTBEAT"
+        const val ACTION_RESTART_SERVICE = "com.example.arklock.RESTART_SERVICE"
 
         fun startService(context: Context) {
             val intent = Intent(context, AppLockService::class.java)
@@ -59,6 +63,37 @@ class AppLockService : Service() {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
+            }
+        }
+
+        fun scheduleServiceRestart(context: Context) {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val restartIntent = Intent(context, ServiceRestartReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                RESTART_REQUEST_CODE,
+                restartIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val triggerTime = System.currentTimeMillis() + RESTART_INTERVAL
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                } else {
+                    alarmManager.setExact(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        pendingIntent
+                    )
+                }
+            } catch (e: Exception) {
+                // Handle exception
             }
         }
     }
@@ -75,6 +110,11 @@ class AppLockService : Service() {
         registerAlarmReceiver()
         scheduleNextAlarm()
         scheduleNextHeartbeat()
+        scheduleServiceRestart()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
@@ -82,6 +122,7 @@ class AppLockService : Service() {
         val filter = IntentFilter().apply {
             addAction(ACTION_ALARM_TRIGGER)
             addAction(ACTION_HEARTBEAT)
+            addAction(ACTION_RESTART_SERVICE)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -104,7 +145,47 @@ class AppLockService : Service() {
                     refreshWakeLock()
                     scheduleNextHeartbeat()
                 }
+                ACTION_RESTART_SERVICE -> {
+                    // Service restart logic
+                    if (monitoringJob?.isActive != true) {
+                        startMonitoring()
+                    }
+                    scheduleServiceRestart()
+                }
             }
+        }
+    }
+
+    private fun scheduleServiceRestart() {
+        val restartIntent = Intent(this, AppLockService::class.java).apply {
+            action = ACTION_RESTART_SERVICE
+        }
+
+        restartPendingIntent = PendingIntent.getService(
+            this,
+            RESTART_REQUEST_CODE,
+            restartIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val triggerTime = System.currentTimeMillis() + RESTART_INTERVAL
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    restartPendingIntent!!
+                )
+            } else {
+                alarmManager.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    triggerTime,
+                    restartPendingIntent!!
+                )
+            }
+        } catch (e: Exception) {
+            // Handle exception
         }
     }
 
@@ -199,6 +280,10 @@ class AppLockService : Service() {
             alarmManager.cancel(it)
             heartbeatPendingIntent = null
         }
+        restartPendingIntent?.let {
+            alarmManager.cancel(it)
+            restartPendingIntent = null
+        }
     }
 
     private fun createNotificationChannel() {
@@ -229,16 +314,28 @@ class AppLockService : Service() {
     }
 
     private fun startMonitoring() {
-        wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/)
+        try {
+            if (!wakeLock.isHeld) {
+                wakeLock.acquire(10 * 60 * 1000L /*10 minutes*/)
+            }
+        } catch (e: Exception) {
+            // Handle exception
+        }
+
         monitoringJob?.cancel()
         monitoringJob = scope.launch {
             while (true) {
-                val currentApp = getForegroundApp()
-                if (currentApp != lastForegroundApp) {
-                    lastForegroundApp = currentApp
-                    checkAndLockApp(currentApp)
+                try {
+                    val currentApp = getForegroundApp()
+                    if (currentApp != lastForegroundApp) {
+                        lastForegroundApp = currentApp
+                        checkAndLockApp(currentApp)
+                    }
+                    delay(300) // Check every 300ms
+                } catch (e: Exception) {
+                    // Handle exception and continue monitoring
+                    delay(1000) // Wait a bit longer if there's an error
                 }
-                delay(300) // Check every 300ms
             }
         }
     }
@@ -261,7 +358,6 @@ class AppLockService : Service() {
                 ?.maxByOrNull { it.lastTimeUsed }
                 ?.packageName ?: ""
         } else {
-            // Fallback for older versions (less reliable)
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val tasks = am.getRunningTasks(1)
             tasks?.firstOrNull()?.topActivity?.packageName ?: ""
@@ -271,7 +367,6 @@ class AppLockService : Service() {
     private fun checkAndLockApp(packageName: String) {
         if (packageName.isEmpty() || packageName == this.packageName) return
 
-        // Check if this app was recently unlocked
         if (isUnlockedTemporarily && tempUnlockedPackage == packageName) {
             return
         }
@@ -279,7 +374,6 @@ class AppLockService : Service() {
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
 
         if (lockedApps.contains(packageName)) {
-            // Check if this is a temporary unlock (like when coming back from LockActivity)
             if (sharedPref.getBoolean("temp_unlock_$packageName", false)) {
                 sharedPref.edit().remove("temp_unlock_$packageName").apply()
                 tempUnlockedPackage = packageName
@@ -302,14 +396,27 @@ class AppLockService : Service() {
     }
 
     override fun onDestroy() {
+        scheduleServiceRestart(this)
         stopMonitoring()
-        wakeLock.release()
+        if (wakeLock.isHeld) {
+            wakeLock.release()
+        }
         cancelAlarms()
         try {
             unregisterReceiver(alarmReceiver)
         } catch (e: IllegalArgumentException) {
-            // Receiver was not registered
         }
         super.onDestroy()
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        scheduleServiceRestart(this)
+        super.onTaskRemoved(rootIntent)
+    }
+}
+
+class ServiceRestartReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        AppLockService.startService(context)
     }
 }
