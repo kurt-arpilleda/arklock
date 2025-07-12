@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.abs
 import kotlin.math.sqrt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -538,15 +539,28 @@ fun PatternInput(
                                     currentPattern = listOf(dotIndex + 1) // Convert to 1-9
                                 }
                             },
-                            onDrag = { change: androidx.compose.ui.input.pointer.PointerInputChange, dragAmount: Offset ->
+                            onDrag = { change, _ ->
                                 if (isDragging) {
                                     val currentPos = change.position
                                     currentPath = currentPath + currentPos
 
-                                    // Check if we're over a new dot
                                     val dotIndex = getDotIndex(currentPos, dotSizePx, spacingPx, patternSize)
-                                    if (dotIndex != -1 && !currentPattern.contains(dotIndex + 1)) {
-                                        currentPattern = currentPattern + (dotIndex + 1) // Convert to 1-9
+                                    if (dotIndex != -1) {
+                                        val newDot = dotIndex + 1
+                                        if (currentPattern.isEmpty()) {
+                                            currentPattern = listOf(newDot)
+                                        } else if (!currentPattern.contains(newDot)) {
+                                            // Get the last selected dot
+                                            val lastDot = currentPattern.last()
+
+                                            // Calculate all intermediate dots between lastDot and newDot
+                                            val intermediateDots = getIntermediateDots(lastDot, newDot, patternSize)
+
+                                            // Add all intermediate dots that haven't been selected yet
+                                            val newDots = intermediateDots.filter { !currentPattern.contains(it) }
+
+                                            currentPattern = currentPattern + newDots + newDot
+                                        }
                                     }
                                 }
                             },
@@ -622,7 +636,35 @@ fun PatternInput(
         }
     }
 }
+private fun getIntermediateDots(start: Int, end: Int, patternSize: Int): List<Int> {
+    if (start == end) return emptyList()
 
+    val startRow = (start - 1) / patternSize
+    val startCol = (start - 1) % patternSize
+    val endRow = (end - 1) / patternSize
+    val endCol = (end - 1) % patternSize
+
+    if (startRow != endRow && startCol != endCol &&
+        abs(startRow - endRow) != abs(startCol - endCol)) {
+        return emptyList()
+    }
+
+    val intermediate = mutableListOf<Int>()
+
+    val rowStep = if (endRow > startRow) 1 else if (endRow < startRow) -1 else 0
+    val colStep = if (endCol > startCol) 1 else if (endCol < startCol) -1 else 0
+
+    var currentRow = startRow + rowStep
+    var currentCol = startCol + colStep
+
+    while (currentRow != endRow || currentCol != endCol) {
+        intermediate.add(currentRow * patternSize + currentCol + 1)
+        currentRow += rowStep
+        currentCol += colStep
+    }
+
+    return intermediate
+}
 private fun DrawScope.drawPatternLines(
     pattern: List<Int>,
     dotSizePx: Float,

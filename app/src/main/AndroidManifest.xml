@@ -42,6 +42,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.ArkLock">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -51,6 +52,7 @@
         </activity>
         <activity
             android:name=".PasswordActivity"
+            android:screenOrientation="portrait"
             android:exported="false" />
         <receiver
             android:name=".AppLaunchReceiver"
@@ -78,12 +80,9 @@
             android:name=".LockActivity"
             android:exported="false"
             android:enabled="true"
-            android:theme="@style/Theme.ArkLock"
-            android:launchMode="singleTop"
-            android:excludeFromRecents="true"
-            android:noHistory="true"
-            android:taskAffinity=""
-            android:allowTaskReparenting="false" />
+            android:noHistory="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.ArkLock" />
 
         <uses-library android:name="org.apache.http.legacy" android:required="false" />
 
