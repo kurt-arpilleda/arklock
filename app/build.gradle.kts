@@ -70,6 +70,4 @@ dependencies {
     implementation ("androidx.lifecycle:lifecycle-common-java8:2.9.1")
     implementation ("androidx.work:work-runtime-ktx:2.10.2")
     implementation ("androidx.concurrent:concurrent-futures-ktx:1.2.0")
-
-
 }

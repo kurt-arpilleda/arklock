@@ -52,7 +52,7 @@ fun DashboardPage() {
     var appsList by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
-    var showSystemApps by remember { mutableStateOf(false) }
+    var showLockedOnly by remember { mutableStateOf(false) } // Changed from showSystemApps
     var showPasscodeVerification by remember { mutableStateOf(false) }
     CheckRequiredPermissions()
 
@@ -64,12 +64,12 @@ fun DashboardPage() {
         isLoading = false
     }
 
-    // Filter apps based on search query and system app preference
-    val filteredApps = remember(appsList, searchQuery, showSystemApps) {
+    // Filter apps based on search query and locked filter
+    val filteredApps = remember(appsList, searchQuery, showLockedOnly) {
         appsList.filter { app ->
             val matchesSearch = app.name.contains(searchQuery, ignoreCase = true) ||
                     app.packageName.contains(searchQuery, ignoreCase = true)
-            val matchesFilter = if (showSystemApps) true else !app.isSystemApp
+            val matchesFilter = if (showLockedOnly) app.isLocked else true
             matchesSearch && matchesFilter
         }
     }
@@ -173,20 +173,19 @@ fun DashboardPage() {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Filter Toggle
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Show system apps",
+                text = "Show locked apps only",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Switch(
-                checked = showSystemApps,
-                onCheckedChange = { showSystemApps = it },
+                checked = showLockedOnly,
+                onCheckedChange = { showLockedOnly = it },
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colorScheme.primary,
                     checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
