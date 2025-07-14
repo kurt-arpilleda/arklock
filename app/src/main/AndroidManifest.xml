@@ -69,8 +69,9 @@
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
-            android:exported="false">
-            <intent-filter>
+            android:exported="false"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.REBOOT" />
@@ -104,6 +105,7 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.Transparent"
             android:taskAffinity=""
+            android:turnScreenOn="true"
             android:screenOrientation="portrait"/>
 
         <uses-library android:name="org.apache.http.legacy" android:required="false" />

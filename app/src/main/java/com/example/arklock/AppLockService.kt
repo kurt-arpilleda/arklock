@@ -110,6 +110,9 @@ class AppLockService : Service() {
         const val ACTION_RESTART_SERVICE = "com.example.arklock.RESTART_SERVICE"
         const val ACTION_KEEP_ALIVE = "com.example.arklock.KEEP_ALIVE"
         const val ACTION_CRITICAL_OPERATION = "com.example.arklock.CRITICAL_OPERATION"
+        const val ACTION_BOOT_COMPLETED = "com.example.arklock.BOOT_COMPLETED"
+        const val ACTION_FORCE_CHECK = "com.example.arklock.FORCE_CHECK"
+        const val ACTION_IMMEDIATE_CHECK = "com.example.arklock.IMMEDIATE_CHECK"
 
         fun startService(context: Context) {
             val intent = Intent(context, AppLockService::class.java)
@@ -284,10 +287,41 @@ class AppLockService : Service() {
                 refreshWakeLock()
                 scheduleKeepAlive()
             }
+            ACTION_BOOT_COMPLETED -> {
+                handleBootCompleted()
+            }
+            ACTION_FORCE_CHECK -> {
+                forceCheckCurrentApp()
+            }
+            ACTION_IMMEDIATE_CHECK -> {
+                checkCurrentAppImmediately()
+            }
         }
         return START_STICKY
     }
-
+    private fun handleBootCompleted() {
+        // Start monitoring immediately with higher frequency
+        startMonitoring(bootMode = true)
+        // Schedule an immediate check after 500ms
+        scope.launch {
+            delay(500)
+            checkCurrentAppImmediately()
+        }
+    }
+    private fun forceCheckCurrentApp() {
+        if (monitoringJob?.isActive != true) {
+            startMonitoring()
+        }
+        checkCurrentAppImmediately()
+    }
+    private fun checkCurrentAppImmediately() {
+        scope.launch {
+            val currentApp = getForegroundApp()
+            if (currentApp.isNotEmpty()) {
+                checkAndLockApp(currentApp)
+            }
+        }
+    }
     private fun handleCriticalOperation() {
         try {
             if (!criticalWakeLock.isHeld) {
@@ -595,24 +629,23 @@ class AppLockService : Service() {
             .build()
     }
 
-    private fun startMonitoring() {
+    private fun startMonitoring(bootMode: Boolean = false) {
         acquireWakeLocks()
-
         monitoringJob?.cancel()
+
         monitoringJob = scope.launch {
+            val interval = if (bootMode) 100L else 200L
             while (true) {
                 try {
                     val currentApp = getForegroundApp()
                     if (currentApp != lastForegroundApp) {
-                        // Reset unlock status for previous app when switching away
                         if (lastForegroundApp.isNotEmpty()) {
                             resetAppUnlockStatus(lastForegroundApp)
                         }
-
                         lastForegroundApp = currentApp
                         checkAndLockApp(currentApp)
                     }
-                    delay(200)
+                    delay(interval)
                 } catch (e: Exception) {
                     delay(1000)
                 }
