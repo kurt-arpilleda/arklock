@@ -18,45 +18,94 @@ class LockActivity : ComponentActivity() {
     private lateinit var packageName: String
     private lateinit var sharedPref: SharedPreferences
     private lateinit var wakeLock: PowerManager.WakeLock
+    private var isUnlocking = false
+
+    companion object {
+        private var isActivityVisible = false
+    }
 
     @SuppressLint("ServiceCast")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Prevent multiple instances
+        if (isActivityVisible) {
+            finish()
+            return
+        }
+
         packageName = intent.getStringExtra("package_name") ?: ""
+        if (packageName.isEmpty()) {
+            finish()
+            return
+        }
+
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
 
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // Check if app is already unlocked
+        if (sharedPref.getBoolean("unlocked_$packageName", false)) {
+            finish()
+            return
+        }
+
+        // Security and wake lock setup
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SECURE or
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "ArkLock:LockActivityWakeLock"
         )
         wakeLock.acquire(60 * 1000L)
+
+        isActivityVisible = true
+
         setContent {
             LockScreenContent(
                 packageName = packageName,
                 onUnlock = {
-                    // Set app as unlocked in SharedPreferences
-                    sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
-                    finishAndRemoveTask()
+                    if (!isUnlocking) {
+                        isUnlocking = true
+                        sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
+                        finishAndRemoveTask()
+                    }
                 }
             )
         }
     }
 
-    override fun onPause() {
-        super.onPause()
+    override fun onResume() {
+        super.onResume()
+        isActivityVisible = true
+
+        // Double-check if app is still locked
+        if (sharedPref.getBoolean("unlocked_$packageName", false)) {
+            finish()
+        }
     }
 
-    override fun onBackPressed() {
-        // Disable back button
+    override fun onPause() {
+        super.onPause()
+        // Don't set isActivityVisible to false here to prevent multiple instances
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (wakeLock.isHeld) {
+        isActivityVisible = false
+        isUnlocking = false
+
+        if (::wakeLock.isInitialized && wakeLock.isHeld) {
             wakeLock.release()
         }
+    }
+
+    override fun onBackPressed() {
+
     }
 }
 

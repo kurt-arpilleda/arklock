@@ -105,6 +105,7 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.Transparent"
             android:taskAffinity=""
+            android:noHistory="true"
             android:turnScreenOn="true"
             android:screenOrientation="portrait"/>
 

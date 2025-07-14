@@ -548,20 +548,27 @@ class AppLockService : Service() {
         monitoringJob?.cancel()
 
         monitoringJob = scope.launch {
-            val interval = if (bootMode) 100L else 200L
+            val interval = if (bootMode) 100L else 150L // Reduced interval for faster response
+            var consecutiveFailures = 0
+
             while (true) {
                 try {
                     val currentApp = getForegroundApp()
-                    if (currentApp != lastForegroundApp) {
+                    if (currentApp != lastForegroundApp && currentApp.isNotEmpty()) {
                         if (lastForegroundApp.isNotEmpty()) {
                             resetAppUnlockStatus(lastForegroundApp)
                         }
                         lastForegroundApp = currentApp
+
+                        // Immediate check with slight delay to ensure app is fully loaded
+                        delay(50)
                         checkAndLockApp(currentApp)
                     }
+                    consecutiveFailures = 0
                     delay(interval)
                 } catch (e: Exception) {
-                    delay(1000)
+                    consecutiveFailures++
+                    delay(minOf(1000L * consecutiveFailures, 5000L)) // Exponential backoff
                 }
             }
         }
@@ -602,14 +609,42 @@ class AppLockService : Service() {
             if (!isUnlocked) {
                 handleCriticalOperation()
 
+                // Add this check to prevent duplicate activities
+                val currentActivityPackage = getCurrentTopActivity()
+                if (currentActivityPackage == this.packageName) {
+                    return // LockActivity is already showing
+                }
+
                 val intent = Intent(this, LockActivity::class.java).apply {
                     putExtra("package_name", packageName)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                            Intent.FLAG_ACTIVITY_NO_HISTORY or
+                            Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
                 }
                 startActivity(intent)
             }
         }
     }
+    private fun getCurrentTopActivity(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val now = System.currentTimeMillis()
+            val stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                now - 500, // Check last 5 seconds
+                now
+            )
+            stats?.filter { it.lastTimeUsed >= now - 500 }
+                ?.maxByOrNull { it.lastTimeUsed }
+                ?.packageName ?: ""
+        } else {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val tasks = am.getRunningTasks(1)
+            tasks?.firstOrNull()?.topActivity?.packageName ?: ""
+        }
+    }
+
 
     private fun resetAppUnlockStatus(packageName: String) {
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
