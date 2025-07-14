@@ -1,3 +1,4 @@
+// LockActivity.kt
 package com.example.arklock
 
 import android.content.Context
@@ -20,17 +21,14 @@ class LockActivity : ComponentActivity() {
         packageName = intent.getStringExtra("package_name") ?: ""
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
 
-        // Prevent screenshots and recent apps
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         setContent {
             LockScreenContent(
                 packageName = packageName,
                 onUnlock = {
-                    // Mark this app as temporarily unlocked
-                    sharedPref.edit().putBoolean("temp_unlock_$packageName", true).apply()
-
-                    // Simply finish the activity - don't relaunch the app
+                    // Set app as unlocked in SharedPreferences
+                    sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
                     finishAndRemoveTask()
                 }
             )
@@ -42,6 +40,7 @@ class LockActivity : ComponentActivity() {
     }
 
     override fun onBackPressed() {
+        // Disable back button
     }
 
     override fun onDestroy() {
@@ -60,6 +59,7 @@ fun LockScreenContent(packageName: String, onUnlock: () -> Unit) {
     }
 
     BackHandler {
+        // Disable back button
     }
 
     PasscodeScreen(

@@ -1,3 +1,4 @@
+// AppLockService.kt
 package com.example.arklock
 
 import android.annotation.SuppressLint
@@ -39,8 +40,6 @@ class AppLockService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO)
     private var monitoringJob: Job? = null
     private var lastForegroundApp = ""
-    private var isUnlockedTemporarily = false
-    private var tempUnlockedPackage = ""
     private lateinit var sharedPref: SharedPreferences
     private lateinit var alarmManager: AlarmManager
     private var alarmPendingIntent: PendingIntent? = null
@@ -59,7 +58,6 @@ class AppLockService : Service() {
         }
     }
 
-    // Additional wake lock for critical operations
     private val criticalWakeLock by lazy {
         (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
             newWakeLock(
@@ -85,7 +83,6 @@ class AppLockService : Service() {
             if (!wakeLock.isHeld) {
                 wakeLock.acquire(24 * 60 * 60 * 1000L /*24 hours*/)
             }
-            // Acquire critical wake lock for shorter periods
             if (!criticalWakeLock.isHeld) {
                 criticalWakeLock.acquire(30 * 60 * 1000L /*30 minutes*/)
             }
@@ -99,9 +96,9 @@ class AppLockService : Service() {
         private const val CRITICAL_CHANNEL_ID = "app_lock_critical_channel"
         private const val NOTIFICATION_ID = 2
         private const val CRITICAL_NOTIFICATION_ID = 3
-        private const val ALARM_INTERVAL = 5 * 60 * 1000L // 5 minutes (reduced)
-        private const val HEARTBEAT_INTERVAL = 2 * 60 * 1000L // 2 minutes (reduced)
-        private const val RESTART_INTERVAL = 15 * 1000L // 15 seconds (reduced)
+        private const val ALARM_INTERVAL = 5 * 60 * 1000L // 5 minutes
+        private const val HEARTBEAT_INTERVAL = 2 * 60 * 1000L // 2 minutes
+        private const val RESTART_INTERVAL = 15 * 1000L // 15 seconds
         private const val KEEP_ALIVE_INTERVAL = 30 * 1000L // 30 seconds
         private const val ALARM_REQUEST_CODE = 1001
         private const val HEARTBEAT_REQUEST_CODE = 1002
@@ -144,8 +141,8 @@ class AppLockService : Service() {
 
         fun scheduleWorkManager(context: Context) {
             val constraints = Constraints.Builder()
-                .setRequiresBatteryNotLow(false) // Don't require battery not low
-                .setRequiresStorageNotLow(false) // Don't require storage not low
+                .setRequiresBatteryNotLow(false)
+                .setRequiresStorageNotLow(false)
                 .build()
 
             val workRequest = PeriodicWorkRequestBuilder<AppLockWorker>(
@@ -223,7 +220,6 @@ class AppLockService : Service() {
             }
         }
 
-        // Method to check if battery optimization is disabled
         fun isIgnoringBatteryOptimizations(context: Context): Boolean {
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -233,7 +229,6 @@ class AppLockService : Service() {
             }
         }
 
-        // Method to request battery optimization whitelist
         fun requestBatteryOptimizationWhitelist(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -245,7 +240,6 @@ class AppLockService : Service() {
                     try {
                         context.startActivity(intent)
                     } catch (e: Exception) {
-                        // Fallback to battery optimization settings
                         val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         }
@@ -264,7 +258,6 @@ class AppLockService : Service() {
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
 
-        // Check battery optimization status
         isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations(this)
 
         createNotificationChannels()
@@ -272,7 +265,6 @@ class AppLockService : Service() {
         startMonitoring()
         registerAlarmReceiver()
 
-        // Schedule all keep-alive mechanisms
         scheduleNextAlarm()
         scheduleNextHeartbeat()
         scheduleKeepAlive()
@@ -280,18 +272,15 @@ class AppLockService : Service() {
         scheduleWorkManager(this)
         scheduleJobScheduler(this)
 
-        // Acquire wake locks
         acquireWakeLocks()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CRITICAL_OPERATION -> {
-                // Handle critical operations that need to bypass power saving
                 handleCriticalOperation()
             }
             ACTION_KEEP_ALIVE -> {
-                // Keep alive ping
                 refreshWakeLock()
                 scheduleKeepAlive()
             }
@@ -300,7 +289,6 @@ class AppLockService : Service() {
     }
 
     private fun handleCriticalOperation() {
-        // Acquire critical wake lock for important operations
         try {
             if (!criticalWakeLock.isHeld) {
                 criticalWakeLock.acquire(5 * 60 * 1000L /*5 minutes*/)
@@ -357,18 +345,15 @@ class AppLockService : Service() {
                     handleCriticalOperation()
                 }
                 Intent.ACTION_SCREEN_ON -> {
-                    // Screen turned on, refresh monitoring
                     refreshWakeLock()
                     if (monitoringJob?.isActive != true) {
                         startMonitoring()
                     }
                 }
                 Intent.ACTION_SCREEN_OFF -> {
-                    // Screen turned off, ensure wake locks are held
                     acquireWakeLocks()
                 }
                 Intent.ACTION_USER_PRESENT -> {
-                    // User unlocked device, refresh monitoring
                     refreshWakeLock()
                     if (monitoringJob?.isActive != true) {
                         startMonitoring()
@@ -446,12 +431,9 @@ class AppLockService : Service() {
 
     private fun refreshWakeLock() {
         try {
-            // Refresh primary wake lock
             if (!wakeLock.isHeld) {
                 wakeLock.acquire(24 * 60 * 60 * 1000L /*24 hours*/)
             }
-
-            // Refresh critical wake lock periodically
             if (!criticalWakeLock.isHeld) {
                 criticalWakeLock.acquire(30 * 60 * 1000L /*30 minutes*/)
             }
@@ -553,7 +535,6 @@ class AppLockService : Service() {
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Regular channel
             val serviceChannel = NotificationChannel(
                 CHANNEL_ID,
                 "App Lock Service",
@@ -565,7 +546,6 @@ class AppLockService : Service() {
                 enableVibration(false)
             }
 
-            // Critical channel with high importance
             val criticalChannel = NotificationChannel(
                 CRITICAL_CHANNEL_ID,
                 "App Lock Critical",
@@ -616,7 +596,6 @@ class AppLockService : Service() {
     }
 
     private fun startMonitoring() {
-        // Acquire wake locks before starting monitoring
         acquireWakeLocks()
 
         monitoringJob?.cancel()
@@ -625,13 +604,17 @@ class AppLockService : Service() {
                 try {
                     val currentApp = getForegroundApp()
                     if (currentApp != lastForegroundApp) {
+                        // Reset unlock status for previous app when switching away
+                        if (lastForegroundApp.isNotEmpty()) {
+                            resetAppUnlockStatus(lastForegroundApp)
+                        }
+
                         lastForegroundApp = currentApp
                         checkAndLockApp(currentApp)
                     }
-                    delay(200) // Check every 200ms (more frequent)
+                    delay(200)
                 } catch (e: Exception) {
-                    // Handle exception and continue monitoring
-                    delay(1000) // Wait a bit longer if there's an error
+                    delay(1000)
                 }
             }
         }
@@ -664,45 +647,38 @@ class AppLockService : Service() {
     private fun checkAndLockApp(packageName: String) {
         if (packageName.isEmpty() || packageName == this.packageName) return
 
-        if (isUnlockedTemporarily && tempUnlockedPackage == packageName) {
-            return
-        }
-
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
 
         if (lockedApps.contains(packageName)) {
-            if (sharedPref.getBoolean("temp_unlock_$packageName", false)) {
-                sharedPref.edit().remove("temp_unlock_$packageName").apply()
-                tempUnlockedPackage = packageName
-                isUnlockedTemporarily = true
-                return
-            }
+            // Check if app is already unlocked
+            val isUnlocked = sharedPref.getBoolean("unlocked_$packageName", false)
 
-            handleCriticalOperation()
+            if (!isUnlocked) {
+                handleCriticalOperation()
 
-            val intent = Intent(this, LockActivity::class.java).apply {
-                putExtra("package_name", packageName)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            }
-            startActivity(intent)
-        } else {
-            // Reset temporary unlock if switching to a different app
-            if (tempUnlockedPackage.isNotEmpty() && tempUnlockedPackage != packageName) {
-                isUnlockedTemporarily = false
-                tempUnlockedPackage = ""
+                val intent = Intent(this, LockActivity::class.java).apply {
+                    putExtra("package_name", packageName)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+                startActivity(intent)
             }
         }
     }
 
+    private fun resetAppUnlockStatus(packageName: String) {
+        val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
+        if (lockedApps.contains(packageName)) {
+            sharedPref.edit().putBoolean("unlocked_$packageName", false).apply()
+        }
+    }
+
     override fun onDestroy() {
-        // Schedule multiple restart mechanisms
         scheduleServiceRestart(this)
         scheduleWorkManager(this)
         scheduleJobScheduler(this)
 
         stopMonitoring()
 
-        // Release wake locks
         try {
             if (wakeLock.isHeld) {
                 wakeLock.release()
