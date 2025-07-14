@@ -1,18 +1,15 @@
 package com.example.arklock
 
-import android.app.Activity
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 
 class LockActivity : ComponentActivity() {
     private lateinit var packageName: String
@@ -43,6 +40,13 @@ class LockActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
     }
+
+    override fun onBackPressed() {
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+    }
 }
 
 @Composable
@@ -55,7 +59,9 @@ fun LockScreenContent(packageName: String, onUnlock: () -> Unit) {
         packageName
     }
 
-    // Show the same passcode screen but with app-specific UI
+    BackHandler {
+    }
+
     PasscodeScreen(
         onPasscodeVerified = onUnlock,
         appName = appName

@@ -3,6 +3,7 @@ package com.example.arklock
 import android.app.Activity
 import android.content.Context
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -53,6 +54,12 @@ fun PasscodeScreen(
     // Block recent apps button
     LaunchedEffect(Unit) {
         (context as? Activity)?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    // Handle back button - prevent dismissing the lock screen
+    BackHandler {
+        // Do nothing - prevent back button from closing the lock screen
+        // User must enter correct PIN/pattern to unlock
     }
 
     Column(
@@ -470,6 +477,7 @@ private fun getDotIndex(
     }
     return -1
 }
+
 private fun getIntermediateDots(start: Int, end: Int, patternSize: Int): List<Int> {
     if (start == end) return emptyList()
 
