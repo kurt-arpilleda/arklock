@@ -1,4 +1,3 @@
-// AppLockService.kt
 package com.example.arklock
 
 import android.annotation.SuppressLint
@@ -44,7 +43,6 @@ class AppLockService : Service() {
     private lateinit var alarmManager: AlarmManager
     private var alarmPendingIntent: PendingIntent? = null
     private var heartbeatPendingIntent: PendingIntent? = null
-    private var restartPendingIntent: PendingIntent? = null
     private var keepAlivePendingIntent: PendingIntent? = null
     private var powerManager: PowerManager? = null
     private var isIgnoringBatteryOptimizations = false
@@ -87,7 +85,6 @@ class AppLockService : Service() {
                 criticalWakeLock.acquire(30 * 60 * 1000L /*30 minutes*/)
             }
         } catch (e: Exception) {
-            // Handle exception
         }
     }
 
@@ -95,19 +92,15 @@ class AppLockService : Service() {
         private const val CHANNEL_ID = "app_lock_channel"
         private const val CRITICAL_CHANNEL_ID = "app_lock_critical_channel"
         private const val NOTIFICATION_ID = 2
-        private const val CRITICAL_NOTIFICATION_ID = 3
-        private const val ALARM_INTERVAL = 5 * 60 * 1000L // 5 minutes
-        private const val HEARTBEAT_INTERVAL = 2 * 60 * 1000L // 2 minutes
-        private const val RESTART_INTERVAL = 15 * 1000L // 15 seconds
-        private const val KEEP_ALIVE_INTERVAL = 30 * 1000L // 30 seconds
+        private const val ALARM_INTERVAL = 5 * 60 * 1000L
+        private const val HEARTBEAT_INTERVAL = 2 * 60 * 1000L
+        private const val KEEP_ALIVE_INTERVAL = 30 * 1000L
         private const val ALARM_REQUEST_CODE = 1001
         private const val HEARTBEAT_REQUEST_CODE = 1002
-        private const val RESTART_REQUEST_CODE = 1003
         private const val KEEP_ALIVE_REQUEST_CODE = 1004
 
         const val ACTION_ALARM_TRIGGER = "com.example.arklock.ALARM_TRIGGER"
         const val ACTION_HEARTBEAT = "com.example.arklock.HEARTBEAT"
-        const val ACTION_RESTART_SERVICE = "com.example.arklock.RESTART_SERVICE"
         const val ACTION_KEEP_ALIVE = "com.example.arklock.KEEP_ALIVE"
         const val ACTION_CRITICAL_OPERATION = "com.example.arklock.CRITICAL_OPERATION"
         const val ACTION_BOOT_COMPLETED = "com.example.arklock.BOOT_COMPLETED"
@@ -170,7 +163,7 @@ class AppLockService : Service() {
 
             val jobInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 JobInfo.Builder(JOB_ID, component)
-                    .setPeriodic(15 * 60 * 1000) // 15 minutes
+                    .setPeriodic(15 * 60 * 1000)
                     .setPersisted(true)
                     .setRequiredNetworkType(JobInfo.NETWORK_TYPE_NONE)
                     .setRequiresBatteryNotLow(false)
@@ -191,37 +184,6 @@ class AppLockService : Service() {
         }
 
         private const val JOB_ID = 1001
-
-        fun scheduleServiceRestart(context: Context) {
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val restartIntent = Intent(context, ServiceRestartReceiver::class.java)
-            val pendingIntent = PendingIntent.getBroadcast(
-                context,
-                RESTART_REQUEST_CODE,
-                restartIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val triggerTime = System.currentTimeMillis() + RESTART_INTERVAL
-
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerTime,
-                        pendingIntent
-                    )
-                } else {
-                    alarmManager.setExact(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerTime,
-                        pendingIntent
-                    )
-                }
-            } catch (e: Exception) {
-                // Handle exception
-            }
-        }
 
         fun isIgnoringBatteryOptimizations(context: Context): Boolean {
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -271,7 +233,6 @@ class AppLockService : Service() {
         scheduleNextAlarm()
         scheduleNextHeartbeat()
         scheduleKeepAlive()
-        scheduleServiceRestart()
         scheduleWorkManager(this)
         scheduleJobScheduler(this)
 
@@ -299,21 +260,22 @@ class AppLockService : Service() {
         }
         return START_STICKY
     }
+
     private fun handleBootCompleted() {
-        // Start monitoring immediately with higher frequency
         startMonitoring(bootMode = true)
-        // Schedule an immediate check after 500ms
         scope.launch {
             delay(500)
             checkCurrentAppImmediately()
         }
     }
+
     private fun forceCheckCurrentApp() {
         if (monitoringJob?.isActive != true) {
             startMonitoring()
         }
         checkCurrentAppImmediately()
     }
+
     private fun checkCurrentAppImmediately() {
         scope.launch {
             val currentApp = getForegroundApp()
@@ -322,13 +284,13 @@ class AppLockService : Service() {
             }
         }
     }
+
     private fun handleCriticalOperation() {
         try {
             if (!criticalWakeLock.isHeld) {
-                criticalWakeLock.acquire(5 * 60 * 1000L /*5 minutes*/)
+                criticalWakeLock.acquire(5 * 60 * 1000L)
             }
         } catch (e: Exception) {
-            // Handle exception
         }
     }
 
@@ -337,7 +299,6 @@ class AppLockService : Service() {
         val filter = IntentFilter().apply {
             addAction(ACTION_ALARM_TRIGGER)
             addAction(ACTION_HEARTBEAT)
-            addAction(ACTION_RESTART_SERVICE)
             addAction(ACTION_KEEP_ALIVE)
             addAction(ACTION_CRITICAL_OPERATION)
             addAction(Intent.ACTION_SCREEN_ON)
@@ -364,12 +325,6 @@ class AppLockService : Service() {
                 ACTION_HEARTBEAT -> {
                     refreshWakeLock()
                     scheduleNextHeartbeat()
-                }
-                ACTION_RESTART_SERVICE -> {
-                    if (monitoringJob?.isActive != true) {
-                        startMonitoring()
-                    }
-                    scheduleServiceRestart()
                 }
                 ACTION_KEEP_ALIVE -> {
                     refreshWakeLock()
@@ -426,53 +381,18 @@ class AppLockService : Service() {
                 )
             }
         } catch (e: Exception) {
-            // Handle exception
-        }
-    }
-
-    private fun scheduleServiceRestart() {
-        val restartIntent = Intent(this, AppLockService::class.java).apply {
-            action = ACTION_RESTART_SERVICE
-        }
-
-        restartPendingIntent = PendingIntent.getService(
-            this,
-            RESTART_REQUEST_CODE,
-            restartIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val triggerTime = System.currentTimeMillis() + RESTART_INTERVAL
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerTime,
-                    restartPendingIntent!!
-                )
-            } else {
-                alarmManager.setExact(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerTime,
-                    restartPendingIntent!!
-                )
-            }
-        } catch (e: Exception) {
-            // Handle exception
         }
     }
 
     private fun refreshWakeLock() {
         try {
             if (!wakeLock.isHeld) {
-                wakeLock.acquire(24 * 60 * 60 * 1000L /*24 hours*/)
+                wakeLock.acquire(24 * 60 * 60 * 1000L)
             }
             if (!criticalWakeLock.isHeld) {
-                criticalWakeLock.acquire(30 * 60 * 1000L /*30 minutes*/)
+                criticalWakeLock.acquire(30 * 60 * 1000L)
             }
         } catch (e: Exception) {
-            // Handle exception
         }
     }
 
@@ -511,7 +431,6 @@ class AppLockService : Service() {
                 )
             }
         } catch (e: Exception) {
-            // Handle exception
         }
     }
 
@@ -544,7 +463,6 @@ class AppLockService : Service() {
                 )
             }
         } catch (e: Exception) {
-            // Handle exception
         }
     }
 
@@ -556,10 +474,6 @@ class AppLockService : Service() {
         heartbeatPendingIntent?.let {
             alarmManager.cancel(it)
             heartbeatPendingIntent = null
-        }
-        restartPendingIntent?.let {
-            alarmManager.cancel(it)
-            restartPendingIntent = null
         }
         keepAlivePendingIntent?.let {
             alarmManager.cancel(it)
@@ -683,7 +597,6 @@ class AppLockService : Service() {
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
 
         if (lockedApps.contains(packageName)) {
-            // Check if app is already unlocked
             val isUnlocked = sharedPref.getBoolean("unlocked_$packageName", false)
 
             if (!isUnlocked) {
@@ -706,7 +619,6 @@ class AppLockService : Service() {
     }
 
     override fun onDestroy() {
-        scheduleServiceRestart(this)
         scheduleWorkManager(this)
         scheduleJobScheduler(this)
 
@@ -720,7 +632,6 @@ class AppLockService : Service() {
                 criticalWakeLock.release()
             }
         } catch (e: Exception) {
-            // Handle exception
         }
 
         cancelAlarms()
@@ -728,14 +639,12 @@ class AppLockService : Service() {
         try {
             unregisterReceiver(alarmReceiver)
         } catch (e: IllegalArgumentException) {
-            // Receiver was not registered
         }
 
         super.onDestroy()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        scheduleServiceRestart(this)
         scheduleWorkManager(this)
         super.onTaskRemoved(rootIntent)
     }
