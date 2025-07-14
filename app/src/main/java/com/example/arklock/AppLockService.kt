@@ -632,10 +632,10 @@ class AppLockService : Service() {
             val now = System.currentTimeMillis()
             val stats = usageStatsManager.queryUsageStats(
                 UsageStatsManager.INTERVAL_DAILY,
-                now - 500, // Check last 5 seconds
+                now - 5000, // Check last 5 seconds
                 now
             )
-            stats?.filter { it.lastTimeUsed >= now - 500 }
+            stats?.filter { it.lastTimeUsed >= now - 5000 }
                 ?.maxByOrNull { it.lastTimeUsed }
                 ?.packageName ?: ""
         } else {

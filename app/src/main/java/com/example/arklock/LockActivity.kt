@@ -1,16 +1,18 @@
 // LockActivity.kt
 package com.example.arklock
 
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.PowerManager
+import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 
@@ -28,7 +30,6 @@ class LockActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Prevent multiple instances
         if (isActivityVisible) {
             finish()
             return
@@ -41,14 +42,12 @@ class LockActivity : ComponentActivity() {
         }
 
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
-
-        // Check if app is already unlocked
         if (sharedPref.getBoolean("unlocked_$packageName", false)) {
             finish()
             return
         }
 
-        // Security and wake lock setup
+        // Prevent screenshots, show when locked
         window.addFlags(
             WindowManager.LayoutParams.FLAG_SECURE or
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
@@ -56,12 +55,17 @@ class LockActivity : ComponentActivity() {
                     WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         )
 
+        // Acquire WakeLock
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "ArkLock:LockActivityWakeLock"
         )
         wakeLock.acquire(60 * 1000L)
+
+        // Enable immersive and pin screen
+        enableImmersiveSticky()
+        startLockTask()
 
         isActivityVisible = true
 
@@ -72,6 +76,7 @@ class LockActivity : ComponentActivity() {
                     if (!isUnlocking) {
                         isUnlocking = true
                         sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
+                        stopLockTask()
                         finishAndRemoveTask()
                     }
                 }
@@ -82,30 +87,35 @@ class LockActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         isActivityVisible = true
-
-        // Double-check if app is still locked
         if (sharedPref.getBoolean("unlocked_$packageName", false)) {
+            stopLockTask()
             finish()
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        // Don't set isActivityVisible to false here to prevent multiple instances
+        enableImmersiveSticky()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         isActivityVisible = false
         isUnlocking = false
-
         if (::wakeLock.isInitialized && wakeLock.isHeld) {
             wakeLock.release()
         }
+        stopLockTask()
     }
 
     override fun onBackPressed() {
+        // Block back button
+    }
 
+    private fun enableImmersiveSticky() {
+        window.decorView.systemUiVisibility =
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_FULLSCREEN
     }
 }
 
