@@ -40,24 +40,8 @@ class LockActivity : ComponentActivity() {
         }
     }
 
-    override fun onBackPressed() {
-        // Prevent going back - force user to enter correct passcode
-        moveToHomeScreen()
-    }
-
     override fun onPause() {
         super.onPause()
-        // If activity is paused (user pressed home button), move to home screen
-        if (!isFinishing) {
-            moveToHomeScreen()
-        }
-    }
-
-    private fun moveToHomeScreen() {
-        val startMain = Intent(Intent.ACTION_MAIN)
-        startMain.addCategory(Intent.CATEGORY_HOME)
-        startMain.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        startActivity(startMain)
     }
 }
 

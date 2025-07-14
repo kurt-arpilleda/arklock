@@ -99,11 +99,11 @@
             android:exported="false"/>
         <activity
             android:name=".LockActivity"
-            android:exported="false"
-            android:enabled="true"
-            android:noHistory="false"
-            android:screenOrientation="portrait"
-            android:theme="@style/Theme.ArkLock" />
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Transparent"
+            android:taskAffinity=""
+            android:screenOrientation="portrait"/>
 
         <uses-library android:name="org.apache.http.legacy" android:required="false" />
 
