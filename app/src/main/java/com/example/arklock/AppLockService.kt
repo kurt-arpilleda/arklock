@@ -678,7 +678,6 @@ class AppLockService : Service() {
                 return
             }
 
-            // Trigger critical operation before showing lock screen
             handleCriticalOperation()
 
             val intent = Intent(this, LockActivity::class.java).apply {
