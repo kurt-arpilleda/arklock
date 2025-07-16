@@ -1,6 +1,4 @@
-// LockActivity.kt
 package com.example.arklock
-
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -8,7 +6,6 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.PowerManager
-import android.view.View
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -26,7 +23,7 @@ class LockActivity : ComponentActivity() {
         private var isActivityVisible = false
     }
 
-    @SuppressLint("ServiceCast")
+    @SuppressLint("WakelockTimeout")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -63,10 +60,6 @@ class LockActivity : ComponentActivity() {
         )
         wakeLock.acquire(60 * 1000L)
 
-        // Enable immersive and pin screen
-        enableImmersiveSticky()
-        startLockTask()
-
         isActivityVisible = true
 
         setContent {
@@ -76,7 +69,6 @@ class LockActivity : ComponentActivity() {
                     if (!isUnlocking) {
                         isUnlocking = true
                         sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
-                        stopLockTask()
                         finishAndRemoveTask()
                     }
                 }
@@ -88,10 +80,8 @@ class LockActivity : ComponentActivity() {
         super.onResume()
         isActivityVisible = true
         if (sharedPref.getBoolean("unlocked_$packageName", false)) {
-            stopLockTask()
             finish()
         }
-        enableImmersiveSticky()
     }
 
     override fun onDestroy() {
@@ -101,21 +91,10 @@ class LockActivity : ComponentActivity() {
         if (::wakeLock.isInitialized && wakeLock.isHeld) {
             wakeLock.release()
         }
-        stopLockTask()
     }
 
     override fun onBackPressed() {
         // Block back button
-    }
-
-    private fun enableImmersiveSticky() {
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                    View.SYSTEM_UI_FLAG_FULLSCREEN
     }
 }
 
