@@ -1,11 +1,12 @@
 package com.example.arklock
 
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.os.Bundle
-import android.os.PowerManager
+import android.os.*
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -20,20 +21,20 @@ class LockActivity : ComponentActivity() {
     private var isUnlocking = false
 
     companion object {
-        private var isActivityVisible = false
+        private var isVisible = false
     }
 
     @SuppressLint("WakelockTimeout")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (isActivityVisible) {
+        // Prevent multiple instances
+        if (isVisible) {
             finish()
             return
         }
 
-        packageName = intent.getStringExtra("package_name") ?: ""
-        if (packageName.isEmpty()) {
+        packageName = intent.getStringExtra("package_name") ?: run {
             finish()
             return
         }
@@ -44,62 +45,76 @@ class LockActivity : ComponentActivity() {
             return
         }
 
-        // Prevent screenshots, show when locked
+        // Setup window flags
         window.addFlags(
-            WindowManager.LayoutParams.FLAG_SECURE or
-                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                     WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_SECURE
         )
 
-        // Acquire WakeLock
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        // Acquire wake lock
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-            "ArkLock:LockActivityWakeLock"
+            "ArkLock:LockActivity"
         )
-        wakeLock.acquire(60 * 1000L)
+        wakeLock.acquire(60 * 1000L) // 1 minute
 
-        isActivityVisible = true
+        isVisible = true
 
         setContent {
-            LockScreenContent(
+            LockScreenUI(
                 packageName = packageName,
-                onUnlock = {
-                    if (!isUnlocking) {
-                        isUnlocking = true
-                        sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
-                        finishAndRemoveTask()
-                    }
-                }
+                onUnlock = { handleUnlock() }
             )
         }
+
+        // Dismiss keyguard if needed
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+            km.requestDismissKeyguard(this, null)
+        }
+    }
+
+    private fun handleUnlock() {
+        if (isUnlocking) return
+        isUnlocking = true
+
+        sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
+        finishAndRemoveTask()
     }
 
     override fun onResume() {
         super.onResume()
-        isActivityVisible = true
+        isVisible = true
         if (sharedPref.getBoolean("unlocked_$packageName", false)) {
             finish()
         }
     }
 
+    override fun onPause() {
+        super.onPause()
+        isVisible = false
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        isActivityVisible = false
-        isUnlocking = false
-        if (::wakeLock.isInitialized && wakeLock.isHeld) {
+        isVisible = false
+        if (wakeLock.isHeld) {
             wakeLock.release()
         }
     }
 
     override fun onBackPressed() {
-        // Block back button
+        // Disable back button
     }
 }
 
 @Composable
-fun LockScreenContent(packageName: String, onUnlock: () -> Unit) {
+fun LockScreenUI(packageName: String, onUnlock: () -> Unit) {
     val context = LocalContext.current
     val pm = context.packageManager
     val appName = try {

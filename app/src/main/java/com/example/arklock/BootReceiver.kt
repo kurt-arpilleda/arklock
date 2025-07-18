@@ -1,71 +1,47 @@
 package com.example.arklock
 
-import android.annotation.SuppressLint
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 
 class BootReceiver : BroadcastReceiver() {
+    private val handler = Handler(Looper.getMainLooper())
+
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == Intent.ACTION_LOCKED_BOOT_COMPLETED ||
-            intent.action == Intent.ACTION_REBOOT) {
+        Log.d("BootReceiver", "Boot received: ${intent.action}")
 
-            Log.d("BootReceiver", "Device booted, starting AppLockService")
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_LOCKED_BOOT_COMPLETED -> {
+                Log.d("BootReceiver", "Boot completed - starting AppLockService")
 
-            // Start service immediately with high priority
-            val serviceIntent = Intent(context, AppLockService::class.java).apply {
-                action = AppLockService.ACTION_BOOT_COMPLETED
-                putExtra("boot_completed", true)
+                // Start service immediately
+                AppLockService.startService(context)
+
+                // Also start with a small delay to ensure system is ready
+                handler.postDelayed({
+                    AppLockService.startService(context)
+                }, 5000)
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_PACKAGE_REPLACED -> {
+                Log.d("BootReceiver", "Package replaced - restarting AppLockService")
+                AppLockService.startService(context)
             }
 
-            // Schedule immediate check after 1 second
-            scheduleImmediateCheck(context)
-        }
-    }
-
-    @SuppressLint("ServiceCast")
-    private fun scheduleImmediateCheck(context: Context) {
-        val checkIntent = Intent(context, AppLockService::class.java).apply {
-            action = AppLockService.ACTION_FORCE_CHECK
-        }
-
-        val pendingIntent = PendingIntent.getService(
-            context,
-            0,
-            checkIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val triggerTime = System.currentTimeMillis() + 1000 // 1 second
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerTime,
-                    pendingIntent
-                )
-            } else {
-                alarmManager.setExact(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerTime,
-                    pendingIntent
-                )
+            Intent.ACTION_USER_PRESENT -> {
+                Log.d("BootReceiver", "User present - ensuring service is running")
+                AppLockService.startService(context)
             }
-        } catch (e: Exception) {
-            Log.e("BootReceiver", "Error scheduling immediate check", e)
+
+            Intent.ACTION_SCREEN_ON -> {
+                Log.d("BootReceiver", "Screen on - ensuring service is running")
+                AppLockService.startService(context)
+            }
         }
     }
 }

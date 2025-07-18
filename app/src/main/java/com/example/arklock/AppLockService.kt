@@ -2,7 +2,6 @@ package com.example.arklock
 
 import android.annotation.SuppressLint
 import android.app.ActivityManager
-import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -14,37 +13,37 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import java.util.Timer
+import java.util.TimerTask
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 class AppLockService : Service() {
-    private val scope = CoroutineScope(Dispatchers.IO)
-    private var monitoringJob: Job? = null
     private var lastForegroundApp = ""
     private lateinit var sharedPref: SharedPreferences
-    private lateinit var alarmManager: AlarmManager
+    private val handler = Handler(Looper.getMainLooper())
+    private var isServiceActive = false
+    private var timer: Timer? = null
+    private var scheduledExecutor: ScheduledExecutorService? = null
     private var wakeLock: PowerManager.WakeLock? = null
-    private var isMonitoringActive = false
 
     companion object {
         private const val CHANNEL_ID = "app_lock_channel"
         private const val NOTIFICATION_ID = 2
-        private const val ALARM_INTERVAL = 15 * 60 * 1000L // 15 minutes
-        private const val HEARTBEAT_INTERVAL = 5 * 60 * 1000L // 5 minutes
-        private const val ALARM_REQUEST_CODE = 1001
-        private const val HEARTBEAT_REQUEST_CODE = 1002
-        private const val BOOT_CHECK_DELAY = 30 * 1000L // 30 seconds after boot
+        private const val CHECK_INTERVAL_FAST = 300L // 300ms for very fast response
+        private const val CHECK_INTERVAL_NORMAL = 1000L // 1 second
+        private const val CHECK_INTERVAL_SCREEN_OFF = 5000L // 5 seconds when screen is off
+        private const val TAG = "AppLockService"
 
-        const val ACTION_ALARM_TRIGGER = "com.example.arklock.ALARM_TRIGGER"
-        const val ACTION_HEARTBEAT = "com.example.arklock.HEARTBEAT"
         const val ACTION_FORCE_CHECK = "com.example.arklock.FORCE_CHECK"
         const val ACTION_BOOT_COMPLETED = "com.example.arklock.BOOT_COMPLETED"
 
@@ -60,33 +59,43 @@ class AppLockService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    @SuppressLint("WakelockTimeout")
     override fun onCreate() {
         super.onCreate()
-        Log.d("AppLockService", "Service created")
+        Log.d(TAG, "Service created")
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
-        alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        isServiceActive = true
+
+        // Acquire partial wake lock to prevent service from being killed
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "ArkLock:ServiceWakeLock"
+        )
+        wakeLock?.acquire()
 
         createNotificationChannel()
         startForeground()
         registerReceivers()
-        scheduleNextAlarm()
-        startMonitoring()
+        startMultipleMonitoringMethods()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d("AppLockService", "Service started with action: ${intent?.action}")
+        Log.d(TAG, "Service started with action: ${intent?.action}")
+
+        if (!isServiceActive) {
+            isServiceActive = true
+            startMultipleMonitoringMethods()
+        }
+
         when (intent?.action) {
             ACTION_FORCE_CHECK -> {
-                Log.d("AppLockService", "Force checking current app")
-                forceCheckCurrentApp()
+                Log.d(TAG, "Force checking current app")
+                performAppCheck()
             }
             ACTION_BOOT_COMPLETED -> {
-                Log.d("AppLockService", "Boot completed received")
-                // Delay initial check after boot to allow system to stabilize
-                scope.launch {
-                    delay(BOOT_CHECK_DELAY)
-                    forceCheckCurrentApp()
-                }
+                Log.d(TAG, "Boot completed received")
+                handler.postDelayed({ performAppCheck() }, 2000)
             }
         }
         return START_STICKY
@@ -103,6 +112,7 @@ class AppLockService : Service() {
                 setShowBadge(false)
                 enableLights(false)
                 enableVibration(false)
+                setSound(null, null)
             }
 
             val manager = getSystemService(NotificationManager::class.java)
@@ -118,6 +128,7 @@ class AppLockService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .setAutoCancel(false)
+            .setSound(null)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
@@ -129,8 +140,7 @@ class AppLockService : Service() {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_USER_PRESENT)
-            addAction(ACTION_ALARM_TRIGGER)
-            addAction(ACTION_HEARTBEAT)
+            addAction(ACTION_FORCE_CHECK)
             addAction(Intent.ACTION_BOOT_COMPLETED)
             addAction(Intent.ACTION_LOCKED_BOOT_COMPLETED)
         }
@@ -144,137 +154,172 @@ class AppLockService : Service() {
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            Log.d("AppLockService", "Broadcast received: ${intent.action}")
+            Log.d(TAG, "Broadcast received: ${intent.action}")
             when (intent.action) {
-                ACTION_ALARM_TRIGGER -> {
-                    if (!isMonitoringActive) startMonitoring()
-                    scheduleNextAlarm()
-                }
-                ACTION_HEARTBEAT -> {
-                    scheduleNextHeartbeat()
-                }
                 Intent.ACTION_SCREEN_ON -> {
-                    if (!isMonitoringActive) startMonitoring()
+                    Log.d(TAG, "Screen turned on - starting fast monitoring")
+                    if (!isServiceActive) {
+                        isServiceActive = true
+                        startMultipleMonitoringMethods()
+                    }
+                    switchToFastMonitoring()
+                }
+                Intent.ACTION_SCREEN_OFF -> {
+                    Log.d(TAG, "Screen turned off - switching to slow monitoring")
+                    switchToSlowMonitoring()
                 }
                 Intent.ACTION_USER_PRESENT -> {
-                    forceCheckCurrentApp()
+                    Log.d(TAG, "User present - immediate check")
+                    performAppCheck()
+                    switchToFastMonitoring()
+                }
+                ACTION_FORCE_CHECK -> {
+                    performAppCheck()
                 }
                 Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_LOCKED_BOOT_COMPLETED -> {
-                    if (!isMonitoringActive) startMonitoring()
-                    scheduleNextAlarm()
-                    scheduleNextHeartbeat()
-                    forceCheckCurrentApp()
-                }
-            }
-        }
-    }
-
-    private fun scheduleNextAlarm() {
-        val alarmIntent = Intent(this, AppLockService::class.java).apply {
-            action = ACTION_ALARM_TRIGGER
-        }
-
-        val pendingIntent = PendingIntent.getService(
-            this,
-            ALARM_REQUEST_CODE,
-            alarmIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val triggerTime = System.currentTimeMillis() + ALARM_INTERVAL
-
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                alarmManager.setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerTime,
-                    pendingIntent
-                )
-            } else {
-                alarmManager.setExact(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerTime,
-                    pendingIntent
-                )
-            }
-            Log.d("AppLockService", "Next alarm scheduled in ${ALARM_INTERVAL / 1000} seconds")
-        } catch (e: Exception) {
-            Log.e("AppLockService", "Error scheduling alarm", e)
-        }
-    }
-
-    private fun scheduleNextHeartbeat() {
-        val heartbeatIntent = Intent(this, AppLockService::class.java).apply {
-            action = ACTION_HEARTBEAT
-        }
-
-        val pendingIntent = PendingIntent.getService(
-            this,
-            HEARTBEAT_REQUEST_CODE,
-            heartbeatIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val triggerTime = System.currentTimeMillis() + HEARTBEAT_INTERVAL
-
-        try {
-            alarmManager.setExact(
-                AlarmManager.RTC_WAKEUP,
-                triggerTime,
-                pendingIntent
-            )
-            Log.d("AppLockService", "Next heartbeat scheduled in ${HEARTBEAT_INTERVAL / 1000} seconds")
-        } catch (e: Exception) {
-            Log.e("AppLockService", "Error scheduling heartbeat", e)
-        }
-    }
-
-    private fun startMonitoring() {
-        if (isMonitoringActive) return
-
-        Log.d("AppLockService", "Starting monitoring")
-        isMonitoringActive = true
-        monitoringJob?.cancel()
-
-        monitoringJob = scope.launch {
-            while (isMonitoringActive) {
-                try {
-                    val currentApp = getForegroundApp()
-                    if (currentApp != lastForegroundApp && currentApp.isNotEmpty()) {
-                        Log.d("AppLockService", "Foreground app changed to $currentApp")
-                        if (lastForegroundApp.isNotEmpty()) {
-                            resetAppUnlockStatus(lastForegroundApp)
-                        }
-                        lastForegroundApp = currentApp
-                        checkAndLockApp(currentApp)
+                    Log.d(TAG, "Boot completed")
+                    if (!isServiceActive) {
+                        isServiceActive = true
+                        startMultipleMonitoringMethods()
                     }
-
-                    // Adaptive delay - longer when screen is off
-                    val isScreenOn = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-                        .isInteractive
-                    delay(if (isScreenOn) 500L else 2000L)
-                } catch (e: Exception) {
-                    Log.e("AppLockService", "Monitoring error", e)
-                    delay(5000L) // Recovery delay on error
+                    handler.postDelayed({ performAppCheck() }, 2000)
                 }
             }
         }
     }
 
-    private fun stopMonitoring() {
-        Log.d("AppLockService", "Stopping monitoring")
-        isMonitoringActive = false
-        monitoringJob?.cancel()
-        releaseWakeLock()
+    private fun startMultipleMonitoringMethods() {
+        if (!isServiceActive) return
+
+        Log.d(TAG, "Starting multiple monitoring methods")
+
+        // Method 1: Timer-based monitoring (most reliable)
+        startTimerMonitoring()
+
+        // Method 2: ScheduledExecutor monitoring (backup)
+        startScheduledExecutorMonitoring()
+
+        // Method 3: Handler-based monitoring (additional backup)
+        startHandlerMonitoring()
+
+        // Initial check
+        performAppCheck()
     }
 
-    private fun forceCheckCurrentApp() {
-        scope.launch {
-            Log.d("AppLockService", "Performing force check")
-            val currentApp = getForegroundApp()
-            if (currentApp.isNotEmpty()) {
-                checkAndLockApp(currentApp)
+    private fun startTimerMonitoring() {
+        timer?.cancel()
+        timer = Timer("AppLockTimer", true)
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val interval = if (powerManager.isInteractive) CHECK_INTERVAL_FAST else CHECK_INTERVAL_SCREEN_OFF
+
+        timer?.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                if (isServiceActive) {
+                    performAppCheck()
+                }
             }
+        }, 0, interval)
+    }
+
+    private fun startScheduledExecutorMonitoring() {
+        scheduledExecutor?.shutdown()
+        scheduledExecutor = Executors.newSingleThreadScheduledExecutor()
+
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val interval = if (powerManager.isInteractive) CHECK_INTERVAL_FAST else CHECK_INTERVAL_SCREEN_OFF
+
+        scheduledExecutor?.scheduleAtFixedRate({
+            if (isServiceActive) {
+                performAppCheck()
+            }
+        }, 0, interval, TimeUnit.MILLISECONDS)
+    }
+
+    private fun startHandlerMonitoring() {
+        val runnable = object : Runnable {
+            override fun run() {
+                if (isServiceActive) {
+                    performAppCheck()
+
+                    val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                    val interval = if (powerManager.isInteractive) CHECK_INTERVAL_NORMAL else CHECK_INTERVAL_SCREEN_OFF
+
+                    handler.postDelayed(this, interval)
+                }
+            }
+        }
+        handler.post(runnable)
+    }
+
+    private fun switchToFastMonitoring() {
+        Log.d(TAG, "Switching to fast monitoring")
+
+        // Restart timer with fast interval
+        timer?.cancel()
+        timer = Timer("AppLockTimerFast", true)
+        timer?.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                if (isServiceActive) {
+                    performAppCheck()
+                }
+            }
+        }, 0, CHECK_INTERVAL_FAST)
+
+        // Restart scheduled executor with fast interval
+        scheduledExecutor?.shutdown()
+        scheduledExecutor = Executors.newSingleThreadScheduledExecutor()
+        scheduledExecutor?.scheduleAtFixedRate({
+            if (isServiceActive) {
+                performAppCheck()
+            }
+        }, 0, CHECK_INTERVAL_FAST, TimeUnit.MILLISECONDS)
+    }
+
+    private fun switchToSlowMonitoring() {
+        Log.d(TAG, "Switching to slow monitoring")
+
+        // Restart timer with slow interval
+        timer?.cancel()
+        timer = Timer("AppLockTimerSlow", true)
+        timer?.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                if (isServiceActive) {
+                    performAppCheck()
+                }
+            }
+        }, 0, CHECK_INTERVAL_SCREEN_OFF)
+
+        // Restart scheduled executor with slow interval
+        scheduledExecutor?.shutdown()
+        scheduledExecutor = Executors.newSingleThreadScheduledExecutor()
+        scheduledExecutor?.scheduleAtFixedRate({
+            if (isServiceActive) {
+                performAppCheck()
+            }
+        }, 0, CHECK_INTERVAL_SCREEN_OFF, TimeUnit.MILLISECONDS)
+    }
+
+    private fun performAppCheck() {
+        try {
+            val currentApp = getForegroundApp()
+            if (currentApp != lastForegroundApp && currentApp.isNotEmpty()) {
+                Log.d(TAG, "Foreground app changed from '$lastForegroundApp' to '$currentApp'")
+
+                // Reset previous app unlock status
+                if (lastForegroundApp.isNotEmpty()) {
+                    resetAppUnlockStatus(lastForegroundApp)
+                }
+
+                lastForegroundApp = currentApp
+
+                // Check immediately without any delay
+                handler.post {
+                    checkAndLockApp(currentApp)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in performAppCheck", e)
         }
     }
 
@@ -282,20 +327,45 @@ class AppLockService : Service() {
     private fun getForegroundApp(): String {
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                // Method 1: Usage Stats (most reliable for newer versions)
                 val usageStatsManager = getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
                 val now = System.currentTimeMillis()
                 val stats = usageStatsManager.queryUsageStats(
                     UsageStatsManager.INTERVAL_DAILY,
-                    now - 1000 * 60, // 1 minute window
+                    now - 1000 * 10, // 10 seconds window
                     now
                 )
-                stats?.maxByOrNull { it.lastTimeUsed }?.packageName ?: ""
-            } else {
-                val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                am.getRunningTasks(1)?.firstOrNull()?.topActivity?.packageName ?: ""
+                val foregroundApp = stats?.maxByOrNull { it.lastTimeUsed }?.packageName ?: ""
+
+                if (foregroundApp.isNotEmpty()) {
+                    return foregroundApp
+                }
             }
+
+            // Method 2: Recent Tasks (fallback)
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val recentTasks = am.getRecentTasks(1, ActivityManager.RECENT_WITH_EXCLUDED)
+            if (recentTasks.isNotEmpty()) {
+                val topTask = recentTasks[0]
+                val topApp = topTask.topActivity?.packageName
+                if (!topApp.isNullOrEmpty()) {
+                    return topApp
+                }
+            }
+
+            // Method 3: Running App Processes (additional fallback)
+            val runningApps = am.runningAppProcesses
+            if (!runningApps.isNullOrEmpty()) {
+                for (processInfo in runningApps) {
+                    if (processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                        return processInfo.processName
+                    }
+                }
+            }
+
+            ""
         } catch (e: Exception) {
-            Log.e("AppLockService", "Error getting foreground app", e)
+            Log.e(TAG, "Error getting foreground app", e)
             ""
         }
     }
@@ -303,59 +373,88 @@ class AppLockService : Service() {
     private fun checkAndLockApp(packageName: String) {
         if (packageName.isEmpty() || packageName == this.packageName) return
 
-        Log.d("AppLockService", "Checking app: $packageName")
+        Log.d(TAG, "Checking app: $packageName")
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
-        if (lockedApps.contains(packageName) && !sharedPref.getBoolean("unlocked_$packageName", false)) {
-            Log.d("AppLockService", "Locking app: $packageName")
-            acquireWakeLock(5000L)
 
-            val intent = Intent(this, LockActivity::class.java).apply {
-                putExtra("package_name", packageName)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
-                        Intent.FLAG_ACTIVITY_NO_HISTORY
+        if (lockedApps.contains(packageName)) {
+            val isUnlocked = sharedPref.getBoolean("unlocked_$packageName", false)
+            Log.d(TAG, "App $packageName is locked. Currently unlocked: $isUnlocked")
+
+            if (!isUnlocked) {
+                Log.d(TAG, "Immediately locking app: $packageName")
+
+                // Show lock screen immediately
+                val intent = Intent(this, LockActivity::class.java).apply {
+                    putExtra("package_name", packageName)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                            Intent.FLAG_ACTIVITY_NO_HISTORY or
+                            Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                }
+                startActivity(intent)
+
+                // Additional step: Try to bring our app to foreground
+                handler.postDelayed({
+                    val bringToFrontIntent = Intent(this, LockActivity::class.java).apply {
+                        putExtra("package_name", packageName)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    }
+                    startActivity(bringToFrontIntent)
+                }, 100)
             }
-            startActivity(intent)
         }
     }
 
     private fun resetAppUnlockStatus(packageName: String) {
-        if (sharedPref.getStringSet("locked_apps", emptySet())?.contains(packageName) == true) {
+        val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
+        if (lockedApps.contains(packageName)) {
             sharedPref.edit().putBoolean("unlocked_$packageName", false).apply()
-            Log.d("AppLockService", "Reset unlock status for $packageName")
+            Log.d(TAG, "Reset unlock status for $packageName")
         }
     }
 
-    private fun acquireWakeLock(timeout: Long = 0) {
-        if (wakeLock?.isHeld == true) return
+    private fun stopMonitoring() {
+        Log.d(TAG, "Stopping monitoring")
+        isServiceActive = false
 
-        wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
-            newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "ArkLock:AppLockWakeLock"
-            ).apply {
-                setReferenceCounted(false)
-                if (timeout > 0) acquire(timeout) else acquire()
-                Log.d("AppLockService", "WakeLock acquired for ${if (timeout > 0) "$timeout ms" else "indefinite"}")
-            }
-        }
-    }
+        timer?.cancel()
+        timer = null
 
-    private fun releaseWakeLock() {
-        wakeLock?.let {
-            if (it.isHeld) {
-                it.release()
-                Log.d("AppLockService", "WakeLock released")
-            }
-        }
-        wakeLock = null
+        scheduledExecutor?.shutdown()
+        scheduledExecutor = null
+
+        handler.removeCallbacksAndMessages(null)
     }
 
     override fun onDestroy() {
-        Log.d("AppLockService", "Service destroyed")
+        Log.d(TAG, "Service destroyed")
         stopMonitoring()
-        unregisterReceiver(receiver)
-        releaseWakeLock()
+
+        try {
+            unregisterReceiver(receiver)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering receiver", e)
+        }
+
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+            }
+        }
+
         super.onDestroy()
+
+        // Restart service if it was killed
+        val intent = Intent(this, AppLockService::class.java)
+        startService(intent)
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+
+        // Restart service when task is removed
+        val intent = Intent(this, AppLockService::class.java)
+        startService(intent)
     }
 }
