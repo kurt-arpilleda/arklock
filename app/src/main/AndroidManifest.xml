@@ -32,7 +32,6 @@
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
@@ -79,26 +78,12 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
-
-        <receiver
-            android:name=".ServiceRestartReceiver"
-            android:enabled="true"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.example.arklock.RESTART_SERVICE" />
-            </intent-filter>
-        </receiver>
         <service
             android:name=".AppLockService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse|systemExempted|mediaPlayback|dataSync"
             android:stopWithTask="false" />
-        <service
-            android:name=".AppLockJobService"
-            android:permission="android.permission.BIND_JOB_SERVICE"
-            android:enabled="true"
-            android:exported="false"/>
         <activity
             android:name=".LockActivity"
             android:launchMode="singleTask"
