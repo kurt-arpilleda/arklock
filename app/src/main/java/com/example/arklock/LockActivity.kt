@@ -21,15 +21,25 @@ class LockActivity : ComponentActivity() {
     private var isUnlocking = false
 
     companion object {
-        private var isVisible = false
+        @JvmStatic
+        var isVisible = false
+            private set
+
+        private var lastUnlockTime: Long = 0
+        private const val UNLOCK_COOLDOWN = 1000L // 1 second cooldown
+
+        @JvmStatic
+        fun isLockScreenVisible(): Boolean {
+            return isVisible && System.currentTimeMillis() - lastUnlockTime >= UNLOCK_COOLDOWN
+        }
     }
 
     @SuppressLint("WakelockTimeout")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Prevent multiple instances
-        if (isVisible) {
+        // Prevent multiple instances and rapid re-opening
+        if (isLockScreenVisible()) {
             finish()
             return
         }
@@ -83,7 +93,17 @@ class LockActivity : ComponentActivity() {
         if (isUnlocking) return
         isUnlocking = true
 
+        // Mark app as unlocked
         sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
+
+        // Notify service that app was unlocked
+        sendBroadcast(
+            Intent(AppLockService.ACTION_APP_UNLOCKED).apply {
+                putExtra("package_name", packageName)
+            }
+        )
+
+        lastUnlockTime = System.currentTimeMillis()
         finishAndRemoveTask()
     }
 
