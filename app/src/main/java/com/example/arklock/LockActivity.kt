@@ -21,28 +21,13 @@ class LockActivity : ComponentActivity() {
     private var isUnlocking = false
 
     companion object {
-        @JvmStatic
         var isVisible = false
             private set
-
-        private var lastUnlockTime: Long = 0
-        private const val UNLOCK_COOLDOWN = 1000L // 1 second cooldown
-
-        @JvmStatic
-        fun isLockScreenVisible(): Boolean {
-            return isVisible && System.currentTimeMillis() - lastUnlockTime >= UNLOCK_COOLDOWN
-        }
     }
 
     @SuppressLint("WakelockTimeout")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Prevent multiple instances and rapid re-opening
-        if (isLockScreenVisible()) {
-            finish()
-            return
-        }
 
         packageName = intent.getStringExtra("package_name") ?: run {
             finish()
@@ -55,21 +40,20 @@ class LockActivity : ComponentActivity() {
             return
         }
 
-        // Setup window flags
         window.addFlags(
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                     WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
                     WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_SECURE
+                    WindowManager.LayoutParams.FLAG_SECURE or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
         )
 
-        // Acquire wake lock
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "ArkLock:LockActivity"
         )
-        wakeLock.acquire(60 * 1000L) // 1 minute
+        wakeLock.acquire(60 * 1000L)
 
         isVisible = true
 
@@ -80,7 +64,6 @@ class LockActivity : ComponentActivity() {
             )
         }
 
-        // Dismiss keyguard if needed
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -92,18 +75,12 @@ class LockActivity : ComponentActivity() {
     private fun handleUnlock() {
         if (isUnlocking) return
         isUnlocking = true
-
-        // Mark app as unlocked
         sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
-
-        // Notify service that app was unlocked
         sendBroadcast(
             Intent(AppLockService.ACTION_APP_UNLOCKED).apply {
                 putExtra("package_name", packageName)
             }
         )
-
-        lastUnlockTime = System.currentTimeMillis()
         finishAndRemoveTask()
     }
 
@@ -129,7 +106,6 @@ class LockActivity : ComponentActivity() {
     }
 
     override fun onBackPressed() {
-        // Disable back button
     }
 }
 
@@ -144,7 +120,6 @@ fun LockScreenUI(packageName: String, onUnlock: () -> Unit) {
     }
 
     BackHandler {
-        // Disable back button
     }
 
     PasscodeScreen(
