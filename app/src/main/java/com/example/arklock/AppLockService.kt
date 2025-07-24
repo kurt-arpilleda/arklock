@@ -253,7 +253,6 @@ class AppLockService : Service() {
         }
     }
 
-    // In AppLockService.kt
     private fun checkAndLockApp(packageName: String) {
         if (packageName.isEmpty() || packageName == this.packageName) return
 
@@ -261,19 +260,17 @@ class AppLockService : Service() {
         val unlockedApps = sharedPref.getStringSet("unlocked_apps", emptySet()) ?: emptySet()
 
         if (lockedApps.contains(packageName) && !unlockedApps.contains(packageName)) {
-            val intent = Intent(this, LockActivity::class.java).apply {
-                putExtra("package_name", packageName)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
-                        Intent.FLAG_ACTIVITY_NO_HISTORY or
-                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
-                        Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT
+            handler.post {
+                val intent = Intent(this, LockActivity::class.java).apply {
+                    putExtra("package_name", packageName)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                            Intent.FLAG_ACTIVITY_NO_HISTORY
+                }
+                startActivity(intent)
             }
-            startActivity(intent)
         }
     }
-
-
     private fun killAppProcess(packageName: String) {
         try {
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager

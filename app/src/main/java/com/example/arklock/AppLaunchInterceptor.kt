@@ -16,7 +16,6 @@ class AppLaunchInterceptor : Activity() {
 
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
 
-        // Get the calling package
         val callingPackage = callingActivity?.packageName ?: intent.getStringExtra("package_name")
 
         if (callingPackage != null && callingPackage != packageName) {
@@ -26,7 +25,6 @@ class AppLaunchInterceptor : Activity() {
                 val unlockedApps = sharedPref.getStringSet("unlocked_apps", emptySet()) ?: emptySet()
 
                 if (!unlockedApps.contains(callingPackage)) {
-                    // Show lock screen
                     val lockIntent = Intent(this, LockActivity::class.java).apply {
                         putExtra("package_name", callingPackage)
                         putExtra("intercept_mode", true)
@@ -41,8 +39,6 @@ class AppLaunchInterceptor : Activity() {
                 }
             }
         }
-
-        // If not locked, finish immediately
         finish()
     }
 }
