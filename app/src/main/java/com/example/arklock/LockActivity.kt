@@ -81,8 +81,6 @@ class LockActivity : ComponentActivity() {
             km.requestDismissKeyguard(this, null)
         }
     }
-
-    // In LockActivity.kt
     private fun handleUnlock() {
         if (isUnlocking) return
         isUnlocking = true
