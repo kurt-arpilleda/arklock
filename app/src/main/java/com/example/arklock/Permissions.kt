@@ -100,8 +100,6 @@ fun CheckRequiredPermissions() {
     if (showManufacturerSettingsDialog) {
         ManufacturerSettingsDialog(
             onDismiss = {
-                val sharedPref = context.getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
-                sharedPref.edit().putBoolean("manufacturer_settings_shown", true).apply()
                 showManufacturerSettingsDialog = false
             }
         )
