@@ -218,7 +218,7 @@ fun ManufacturerSettingsDialog(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Set ArkLock to 'No Restrictions' in Power Saving settings",
+                            text = "Disable Power Saving or Battery Saver in settings",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -236,7 +236,7 @@ fun ManufacturerSettingsDialog(
 
                 Text(
                     text = "• Settings → Apps → Special app access → Auto-start\n" +
-                            "• Settings → Battery → Power saving management",
+                            "• Settings → Battery → Power saving management or Battery Saver",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(bottom = 16.dp)

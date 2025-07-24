@@ -33,10 +33,10 @@ class AppLockService : Service() {
     companion object {
         private const val CHANNEL_ID = "app_lock_channel"
         private const val NOTIFICATION_ID = 2
-        private const val CHECK_INTERVAL_FAST = 800L
-        private const val CHECK_INTERVAL_NORMAL = 2000L
-        private const val CHECK_INTERVAL_SLOW = 8000L
-        private const val CHECK_INTERVAL_SCREEN_OFF = 15000L
+        private const val CHECK_INTERVAL_FAST = 300L      // Faster
+        private const val CHECK_INTERVAL_NORMAL = 1000L   // Faster
+        private const val CHECK_INTERVAL_SLOW = 5000L     // Faster
+        private const val CHECK_INTERVAL_SCREEN_OFF = 10000L
 
         const val ACTION_FORCE_CHECK = "com.example.arklock.FORCE_CHECK"
         const val ACTION_BOOT_COMPLETED = "com.example.arklock.BOOT_COMPLETED"
@@ -209,10 +209,12 @@ class AppLockService : Service() {
                     resetAppUnlockStatus(lastForegroundApp)
                 }
                 lastForegroundApp = currentApp
-                handler.post { checkAndLockApp(currentApp) }
+
+                // Faster response - check immediately without handler post
+                checkAndLockApp(currentApp)
 
                 if (isScreenOn) {
-                    adjustMonitoringInterval(CHECK_INTERVAL_NORMAL)
+                    adjustMonitoringInterval(CHECK_INTERVAL_FAST) // Use faster interval
                 }
             }
         } catch (e: Exception) {
@@ -251,31 +253,52 @@ class AppLockService : Service() {
         }
     }
 
+    // In AppLockService.kt
     private fun checkAndLockApp(packageName: String) {
         if (packageName.isEmpty() || packageName == this.packageName) return
+
         val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
-        if (lockedApps.contains(packageName)) {
-            val isUnlocked = sharedPref.getBoolean("unlocked_$packageName", false)
-            if (!isUnlocked) {
-                val intent = Intent(this, LockActivity::class.java).apply {
-                    putExtra("package_name", packageName)
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_CLEAR_TASK or
-                            Intent.FLAG_ACTIVITY_NO_HISTORY or
-                            Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+        val unlockedApps = sharedPref.getStringSet("unlocked_apps", emptySet()) ?: emptySet()
+
+        if (lockedApps.contains(packageName) && !unlockedApps.contains(packageName)) {
+            val intent = Intent(this, LockActivity::class.java).apply {
+                putExtra("package_name", packageName)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                        Intent.FLAG_ACTIVITY_NO_HISTORY or
+                        Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS or
+                        Intent.FLAG_ACTIVITY_BROUGHT_TO_FRONT
+            }
+            startActivity(intent)
+        }
+    }
+
+
+    private fun killAppProcess(packageName: String) {
+        try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                // For API 21+, we can't kill other apps directly
+                // But we can move our lock activity to front immediately
+                val intent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 startActivity(intent)
+            } else {
+                // For older versions
+                am.killBackgroundProcesses(packageName)
             }
+        } catch (e: Exception) {
+            // Ignore exceptions
         }
     }
-
     private fun resetAppUnlockStatus(packageName: String) {
-        val lockedApps = sharedPref.getStringSet("locked_apps", emptySet()) ?: emptySet()
-        if (lockedApps.contains(packageName)) {
-            sharedPref.edit().putBoolean("unlocked_$packageName", false).apply()
+        val unlockedApps = sharedPref.getStringSet("unlocked_apps", emptySet())?.toMutableSet() ?: mutableSetOf()
+        if (unlockedApps.remove(packageName)) {
+            sharedPref.edit().putStringSet("unlocked_apps", unlockedApps).apply()
         }
     }
-
     private fun stopMonitoring() {
         isServiceActive = false
         currentTask?.cancel(false)
@@ -303,3 +326,5 @@ class AppLockService : Service() {
         startService(intent)
     }
 }
+
+

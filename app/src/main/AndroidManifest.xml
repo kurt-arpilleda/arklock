@@ -96,6 +96,20 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
+        <activity
+            android:name=".AppLaunchInterceptor"
+            android:exported="true"
+            android:theme="@style/Theme.Transparent"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:screenOrientation="portrait"
+            android:noHistory="true">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

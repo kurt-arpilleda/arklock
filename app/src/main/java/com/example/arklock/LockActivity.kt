@@ -34,18 +34,23 @@ class LockActivity : ComponentActivity() {
             return
         }
 
+        val isInterceptMode = intent.getBooleanExtra("intercept_mode", false)
+
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
-        if (sharedPref.getBoolean("unlocked_$packageName", false)) {
+        if (sharedPref.getBoolean("unlocked_$packageName", false) && !isInterceptMode) {
             finish()
             return
         }
 
+        // Set window flags before setContentView
         window.addFlags(
             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                     WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
                     WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                     WindowManager.LayoutParams.FLAG_SECURE or
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE // Prevent interaction during setup
         )
 
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
@@ -64,6 +69,11 @@ class LockActivity : ComponentActivity() {
             )
         }
 
+        // Remove the not touchable flag after a short delay
+        Handler(Looper.getMainLooper()).postDelayed({
+            window.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+        }, 100)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -72,22 +82,30 @@ class LockActivity : ComponentActivity() {
         }
     }
 
+    // In LockActivity.kt
     private fun handleUnlock() {
         if (isUnlocking) return
         isUnlocking = true
-        sharedPref.edit().putBoolean("unlocked_$packageName", true).apply()
+
+        val unlockedApps = sharedPref.getStringSet("unlocked_apps", emptySet())?.toMutableSet() ?: mutableSetOf()
+        unlockedApps.add(packageName)
+        sharedPref.edit().putStringSet("unlocked_apps", unlockedApps).apply()
+
         sendBroadcast(
             Intent(AppLockService.ACTION_APP_UNLOCKED).apply {
                 putExtra("package_name", packageName)
             }
         )
+
         finishAndRemoveTask()
     }
 
     override fun onResume() {
         super.onResume()
         isVisible = true
-        if (sharedPref.getBoolean("unlocked_$packageName", false)) {
+
+        val unlockedApps = sharedPref.getStringSet("unlocked_apps", emptySet()) ?: emptySet()
+        if (unlockedApps.contains(packageName)) {
             finish()
         }
     }
