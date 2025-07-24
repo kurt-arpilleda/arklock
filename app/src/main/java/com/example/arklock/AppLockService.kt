@@ -12,12 +12,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.os.*
-import android.util.Log
 import androidx.core.app.NotificationCompat
-import java.util.Timer
-import java.util.TimerTask
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -26,18 +24,19 @@ class AppLockService : Service() {
     private lateinit var sharedPref: SharedPreferences
     private val handler = Handler(Looper.getMainLooper())
     private var isServiceActive = false
-    private var timer: Timer? = null
     private var scheduledExecutor: ScheduledExecutorService? = null
-    private var wakeLock: PowerManager.WakeLock? = null
+    private var currentTask: ScheduledFuture<*>? = null
     private val isChecking = AtomicBoolean(false)
+    private var isScreenOn = true
+    private var currentInterval = CHECK_INTERVAL_NORMAL
 
     companion object {
         private const val CHANNEL_ID = "app_lock_channel"
         private const val NOTIFICATION_ID = 2
-        private const val CHECK_INTERVAL_FAST = 500L
-        private const val CHECK_INTERVAL_NORMAL = 1500L
-        private const val CHECK_INTERVAL_SCREEN_OFF = 5000L
-        private const val TAG = "AppLockService"
+        private const val CHECK_INTERVAL_FAST = 800L
+        private const val CHECK_INTERVAL_NORMAL = 2000L
+        private const val CHECK_INTERVAL_SLOW = 8000L
+        private const val CHECK_INTERVAL_SCREEN_OFF = 15000L
 
         const val ACTION_FORCE_CHECK = "com.example.arklock.FORCE_CHECK"
         const val ACTION_BOOT_COMPLETED = "com.example.arklock.BOOT_COMPLETED"
@@ -55,34 +54,29 @@ class AppLockService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    @SuppressLint("WakelockTimeout")
     override fun onCreate() {
         super.onCreate()
         sharedPref = getSharedPreferences("arklock_prefs", Context.MODE_PRIVATE)
         isServiceActive = true
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "ArkLock:ServiceWakeLock"
-        )
-        wakeLock?.acquire()
+        isScreenOn = powerManager.isInteractive
 
         createNotificationChannel()
         startForeground()
         registerReceivers()
-        startMultipleMonitoringMethods()
+        startMonitoring()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!isServiceActive) {
             isServiceActive = true
-            startMultipleMonitoringMethods()
+            startMonitoring()
         }
 
         when (intent?.action) {
             ACTION_FORCE_CHECK -> performAppCheck()
-            ACTION_BOOT_COMPLETED -> handler.postDelayed({ performAppCheck() }, 2000)
+            ACTION_BOOT_COMPLETED -> handler.postDelayed({ performAppCheck() }, 3000)
             ACTION_APP_UNLOCKED -> {
                 val packageName = intent.getStringExtra("package_name") ?: ""
                 if (packageName.isNotEmpty()) {
@@ -98,7 +92,7 @@ class AppLockService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "App Lock Service",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
                 description = "Background service for app lock"
                 setShowBadge(false)
@@ -116,7 +110,7 @@ class AppLockService : Service() {
             .setContentTitle("ArkLock Protection Active")
             .setContentText("Monitoring locked apps")
             .setSmallIcon(R.drawable.ic_notification)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .setAutoCancel(false)
             .setSound(null)
@@ -133,7 +127,6 @@ class AppLockService : Service() {
             addAction(ACTION_FORCE_CHECK)
             addAction(ACTION_APP_UNLOCKED)
             addAction(Intent.ACTION_BOOT_COMPLETED)
-            addAction(Intent.ACTION_LOCKED_BOOT_COMPLETED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, RECEIVER_EXPORTED)
@@ -146,67 +139,65 @@ class AppLockService : Service() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 Intent.ACTION_SCREEN_ON -> {
+                    isScreenOn = true
                     if (!isServiceActive) {
                         isServiceActive = true
-                        startMultipleMonitoringMethods()
+                        startMonitoring()
+                    } else {
+                        adjustMonitoringInterval(CHECK_INTERVAL_FAST)
                     }
-                    switchToFastMonitoring()
                     performAppCheck()
                 }
-                Intent.ACTION_SCREEN_OFF -> switchToSlowMonitoring()
+                Intent.ACTION_SCREEN_OFF -> {
+                    isScreenOn = false
+                    adjustMonitoringInterval(CHECK_INTERVAL_SCREEN_OFF)
+                }
                 Intent.ACTION_USER_PRESENT -> {
                     performAppCheck()
-                    switchToFastMonitoring()
+                    adjustMonitoringInterval(CHECK_INTERVAL_FAST)
                 }
                 ACTION_FORCE_CHECK -> performAppCheck()
                 ACTION_APP_UNLOCKED -> {
                     val packageName = intent.getStringExtra("package_name") ?: ""
                     if (packageName.isNotEmpty()) {
                         lastForegroundApp = packageName
+                        adjustMonitoringInterval(CHECK_INTERVAL_SLOW)
                     }
                 }
-                Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_LOCKED_BOOT_COMPLETED -> {
+                Intent.ACTION_BOOT_COMPLETED -> {
                     if (!isServiceActive) {
                         isServiceActive = true
-                        startMultipleMonitoringMethods()
+                        startMonitoring()
                     }
-                    handler.postDelayed({ performAppCheck() }, 2000)
+                    handler.postDelayed({ performAppCheck() }, 3000)
                 }
             }
         }
     }
 
-    private fun startMultipleMonitoringMethods() {
+    private fun startMonitoring() {
         if (!isServiceActive) return
-        startTimerMonitoring()
-        startScheduledExecutorMonitoring()
-        performAppCheck()
-    }
-
-    private fun startTimerMonitoring() {
-        timer?.cancel()
-        timer = Timer("AppLockTimer", true)
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val interval = if (powerManager.isInteractive) CHECK_INTERVAL_FAST else CHECK_INTERVAL_SCREEN_OFF
-        timer?.scheduleAtFixedRate(object : TimerTask() {
-            override fun run() {
-                if (isServiceActive && !isChecking.get()) {
-                    performAppCheck()
-                }
-            }
-        }, 0, interval)
-    }
-
-    private fun startScheduledExecutorMonitoring() {
         scheduledExecutor?.shutdown()
         scheduledExecutor = Executors.newSingleThreadScheduledExecutor()
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val interval = if (powerManager.isInteractive) CHECK_INTERVAL_NORMAL else CHECK_INTERVAL_SCREEN_OFF
-        scheduledExecutor?.scheduleAtFixedRate({
+        currentInterval = if (isScreenOn) CHECK_INTERVAL_NORMAL else CHECK_INTERVAL_SCREEN_OFF
+        scheduleNextCheck()
+    }
+
+    private fun scheduleNextCheck() {
+        currentTask?.cancel(false)
+        currentTask = scheduledExecutor?.schedule({
             if (isServiceActive && !isChecking.get()) {
                 performAppCheck()
+                scheduleNextCheck()
             }
-        }, 0, interval, TimeUnit.MILLISECONDS)
+        }, currentInterval, TimeUnit.MILLISECONDS)
+    }
+
+    private fun adjustMonitoringInterval(newInterval: Long) {
+        if (currentInterval != newInterval) {
+            currentInterval = newInterval
+            scheduleNextCheck()
+        }
     }
 
     private fun performAppCheck() {
@@ -219,6 +210,10 @@ class AppLockService : Service() {
                 }
                 lastForegroundApp = currentApp
                 handler.post { checkAndLockApp(currentApp) }
+
+                if (isScreenOn) {
+                    adjustMonitoringInterval(CHECK_INTERVAL_NORMAL)
+                }
             }
         } catch (e: Exception) {
         } finally {
@@ -234,19 +229,14 @@ class AppLockService : Service() {
                 val now = System.currentTimeMillis()
                 val stats = usageStatsManager.queryUsageStats(
                     UsageStatsManager.INTERVAL_DAILY,
-                    now - 1000 * 10,
+                    now - 5000,
                     now
                 )
                 val foregroundApp = stats?.maxByOrNull { it.lastTimeUsed }?.packageName ?: ""
                 if (foregroundApp.isNotEmpty()) return foregroundApp
             }
+
             val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val recentTasks = am.getRecentTasks(1, ActivityManager.RECENT_WITH_EXCLUDED)
-            if (recentTasks.isNotEmpty()) {
-                val topTask = recentTasks[0]
-                val topApp = topTask.topActivity?.packageName
-                if (!topApp.isNullOrEmpty()) return topApp
-            }
             val runningApps = am.runningAppProcesses
             if (!runningApps.isNullOrEmpty()) {
                 for (processInfo in runningApps) {
@@ -286,18 +276,9 @@ class AppLockService : Service() {
         }
     }
 
-    private fun switchToFastMonitoring() {
-        startMultipleMonitoringMethods()
-    }
-
-    private fun switchToSlowMonitoring() {
-        startMultipleMonitoringMethods()
-    }
-
     private fun stopMonitoring() {
         isServiceActive = false
-        timer?.cancel()
-        timer = null
+        currentTask?.cancel(false)
         scheduledExecutor?.shutdown()
         scheduledExecutor = null
     }
@@ -308,16 +289,12 @@ class AppLockService : Service() {
             unregisterReceiver(receiver)
         } catch (e: Exception) {
         }
-        wakeLock?.let {
-            if (it.isHeld) {
-                it.release()
-            }
-        }
         super.onDestroy()
+
         handler.postDelayed({
             val intent = Intent(this, AppLockService::class.java)
             startService(intent)
-        }, 1000)
+        }, 2000)
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
