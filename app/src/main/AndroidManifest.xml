@@ -88,7 +88,7 @@
         </service>
         <activity
             android:name=".LockActivity"
-            android:exported="false"
+            android:exported="true"
             android:theme="@style/Theme.Transparent"
             android:launchMode="singleInstance"
             android:excludeFromRecents="true"
