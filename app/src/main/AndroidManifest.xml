@@ -112,8 +112,8 @@
             android:screenOrientation="portrait"
             android:noHistory="true">
             <intent-filter android:priority="999">
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
         <provider
